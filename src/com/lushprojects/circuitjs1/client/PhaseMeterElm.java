@@ -1,13 +1,14 @@
 package com.lushprojects.circuitjs1.client;
 
 import java.util.StringTokenizer;
-import com.lushprojects.circuitjs1.client.util.Graphics;
+import com.lushprojects.circuitjs1.client.CircuitElm; // Importar CircuitElm
+import com.lushprojects.circuitjs1.client.CirSim; // Importar Simulación
 
 class PhaseMeterElm extends CircuitElm {
 
     double lastZeroCrossingV = -1, lastZeroCrossingI = -1;
     double phaseAngle = 0;
-    
+
     public PhaseMeterElm(int xx, int yy) {
         super(xx, yy);
     }
@@ -24,7 +25,7 @@ class PhaseMeterElm extends CircuitElm {
         super.setPoints();
     }
 
-    void draw(Graphics g) {
+    void draw(CircuitElm.Graphics g) {
         setBbox(point1, point2, 6);
         draw2Leads(g);
         setPowerColor(g, true);
@@ -33,28 +34,26 @@ class PhaseMeterElm extends CircuitElm {
     }
 
     void doStep() {
-        double vA = volts[0];  // Tensión en fase A
-        double vB = volts[1];  // Tensión en fase B
-        double iA = volts[2];  // Corriente en fase A (medida por caída de tensión)
-        double iB = volts[3];  // Corriente en fase B (medida por caída de tensión)
+        double vA = volts[0];  // Tensión
+        double iA = volts[2];  // Corriente
 
-        // Detectar cruce por cero ascendente de la tensión
+        // Detectar cruce por cero de tensión
         if (vA >= 0 && lastZeroCrossingV < 0) {
-            lastZeroCrossingV = sim.getTime();
+            lastZeroCrossingV = sim.t;
         }
 
-        // Detectar cruce por cero ascendente de la corriente
+        // Detectar cruce por cero de corriente
         if (iA >= 0 && lastZeroCrossingI < 0) {
-            lastZeroCrossingI = sim.getTime();
+            lastZeroCrossingI = sim.t;
         }
 
-        // Si ambos cruces están definidos, calcular el desfase
+        // Calcular ángulo de fase
         if (lastZeroCrossingV > 0 && lastZeroCrossingI > 0) {
             double deltaT = lastZeroCrossingI - lastZeroCrossingV;
-            double period = 1.0 / sim.getTimestep();
+            double period = 1.0 / sim.timeStep;
             phaseAngle = 360 * (deltaT / period);
-            
-            // Asegurar valores en el rango -180° a 180°
+
+            // Asegurar que el ángulo esté entre -180° y 180°
             if (phaseAngle > 180) phaseAngle -= 360;
             if (phaseAngle < -180) phaseAngle += 360;
         }
