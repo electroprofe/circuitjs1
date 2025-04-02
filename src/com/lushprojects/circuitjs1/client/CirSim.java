@@ -4944,6 +4944,8 @@ MouseOutHandler, MouseWheelHandler {
 	} catch (Exception ex) {
 	    debugger();
 	}
+
+	updateToolbar();
     }
 
     static int lastSubcircuitMenuUpdate;
@@ -5001,6 +5003,8 @@ MouseOutHandler, MouseWheelHandler {
     			dragElm.delete();
     			if (mouseMode == MODE_SELECT || mouseMode == MODE_DRAG_SELECTED)
     				clearSelection();
+			toolbar.setModeLabel(Locale.LS("Press and hold mouse to create circuit element"));
+			dragElm = null;
     		}
     		else {
     			elmList.addElement(dragElm);
@@ -5008,8 +5012,9 @@ MouseOutHandler, MouseWheelHandler {
     			circuitChanged = true;
     			writeRecoveryToStorage();
     			unsavedChanges = true;
+			dragElm = null;
+			updateToolbar();
     		}
-    		dragElm = null;
     	}
     	if (circuitChanged) {
     	    needAnalyze();
@@ -5673,7 +5678,10 @@ MouseOutHandler, MouseWheelHandler {
     }
     
     void updateToolbar() {
-	toolbar.setModeLabel(classToLabelMap.get(mouseModeStr));
+	if (dragElm != null)
+	    toolbar.setModeLabel(Locale.LS("Drag Mouse"));
+	else
+	    toolbar.setModeLabel(Locale.LS("Mode: ") + classToLabelMap.get(mouseModeStr));
 	toolbar.highlightButton(mouseModeStr);
     }
 
