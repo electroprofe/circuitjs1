@@ -32,6 +32,8 @@ import java.util.Map;
 import java.util.Random;
 import java.lang.Math;
 
+import com.lushprojects.circuitjs1.client.StringTokenizer;
+
 import com.google.gwt.canvas.client.Canvas;
 import com.google.gwt.user.client.ui.Button;
 import com.google.gwt.user.client.ui.CellPanel;
@@ -309,6 +311,10 @@ MouseOutHandler, MouseWheelHandler {
     static native float devicePixelRatio() /*-{
         return window.devicePixelRatio;
     }-*/;
+	// Javier bloqueo desplazamiento
+	public static native boolean isBloqueoActivo() /*-{
+		return !!$wnd.CIRCUITJS_BLOQUEO;
+	}-*/;
 
     void checkCanvasSize() {
         if (cv.getCoordinateSpaceWidth() != (int) (canvasWidth * devicePixelRatio()))
@@ -1596,6 +1602,15 @@ MouseOutHandler, MouseWheelHandler {
         // Set the graphics transform to deal with zoom and offset
         double scale = devicePixelRatio();
         cvcontext.setTransform(transform[0] * scale, 0, 0, transform[3] * scale, transform[4] * scale, transform[5] * scale);
+		
+		// --- INICIO DE LÍNEA HORIZONTAL DE BACKGROUND ---
+        
+        if (isBloqueoActivo()) {
+			g.setColor(Color.gray);
+			g.drawLine(0, 320, 600, 320);
+		}
+
+        // --- FIN DE LÍNEA HORIZONTAL ---
 
         // Draw each element
         perfmon.startContext("elm.draw()");
@@ -4249,6 +4264,9 @@ MouseOutHandler, MouseWheelHandler {
     	if (!circuitArea.contains(e.getX(), e.getY()))
     	    return;
     	boolean changed = false;
+		    // 🔒 Bloquear movimiento de subcircuitos
+    	if ((dragElm instanceof CustomCompositeElm) && isBloqueoActivo())
+        	return;
     	if (dragElm != null)
     	    dragElm.drag(gx, gy);
     	boolean success = true;
@@ -4484,7 +4502,12 @@ MouseOutHandler, MouseWheelHandler {
     	int i;
     	for (i = 0; i != elmList.size(); i++) {
     		CircuitElm ce = getElm(i);
-    		ce.selectRect(selectedArea, add);
+			
+			// 🔒 Bloqueo de subcircuitos: evitar que se seleccionen
+			if (isBloqueoActivo() && ce instanceof CustomCompositeElm)
+				continue;
+    		
+			ce.selectRect(selectedArea, add);
     	}
 	enableDisableMenuItems();
     }
@@ -4649,6 +4672,12 @@ MouseOutHandler, MouseWheelHandler {
     		//	    // might still be close to a post
     		for (i = 0; i != elmList.size(); i++) {
     			CircuitElm ce = getElm(i);
+		
+				// 🔒 Bloqueo de subcircuitos cuando isBloqueoActivo()
+				if (isBloqueoActivo() && ce instanceof CustomCompositeElm) {
+					continue; // Ignorar este elemento completamente
+				}
+
     			if (mouseMode==MODE_DRAG_POST ) {
     				if (ce.getHandleGrabbedClose(gx, gy, POSTGRABSQ, 0)> 0)
     				{
@@ -4678,6 +4707,12 @@ MouseOutHandler, MouseWheelHandler {
     		}
     	}
     	repaint();
+		// 🔒 Evitar que los subcircuitos bloqueados se seleccionen al pasar el ratón
+		if (isBloqueoActivo() && newMouseElm instanceof CustomCompositeElm) {
+			newMouseElm = null; // anula la detección, no se resalta ni reacciona
+		}
+
+
     	setMouseElm(newMouseElm);
     }
 
@@ -4866,6 +4901,13 @@ MouseOutHandler, MouseWheelHandler {
     	
     	// set mouseElm in case we are on mobile
     	mouseSelect(e);
+
+		// 🔒 Bloquear subcircuitos para que no se seleccionen ni arrastren
+		if ((mouseElm instanceof CustomCompositeElm) && isBloqueoActivo()) {
+			mouseElm = null;
+			dragElm = null;
+			return;
+		}
     	
     	mouseDragging=true;
     	didSwitch = false;

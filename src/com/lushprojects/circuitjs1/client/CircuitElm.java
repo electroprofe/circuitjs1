@@ -1216,5 +1216,11 @@ public abstract class CircuitElm implements Editable {
     }-*/;
     
     native JavaScriptObject getJavaScriptObject() /*-{ return this; }-*/;
+
+	//Javier bloqueo
+	public boolean isBloqueoActivo() {
+    return CirSim.isBloqueoActivo();
+}
+
     
 }

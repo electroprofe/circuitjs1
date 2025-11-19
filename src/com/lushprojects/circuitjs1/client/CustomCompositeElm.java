@@ -42,13 +42,21 @@ public class CustomCompositeElm extends CompositeElm {
     public CustomCompositeElm(int xa, int ya, int xb, int yb, int f,
             StringTokenizer st) {
 	super(xa, ya, xb, yb, f);
-	modelName = CustomLogicModel.unescape(st.nextToken());
+	    // Detectar token "edu" (modo docente)
+    String token = st.nextToken();
+    //if (token.equalsIgnoreCase("edu")) {
+    //    lockMove = true;        // activa el bloqueo
+    //    token = st.nextToken(); // saltar el marcador y continuar
+    //}
+	modelName = token; //CustomLogicModel.unescape(st.nextToken());
 	updateModels(st);
     }
     
     public String dump() {
 	// insert model name before the elements
 	String s = super.dumpWithMask(0);
+	//if (lockMove)
+    //    s += " edu";
 	s += " " + CustomLogicModel.escape(modelName);
 	s += dumpElements();
 	return s;

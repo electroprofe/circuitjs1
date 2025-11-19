@@ -15,9 +15,16 @@
 
     You should have received a copy of the GNU General Public License
     along with CircuitJS1.  If not, see <http://www.gnu.org/licenses/>.
+    
+    
+    javier Bloqueado - Modificaciones para permitir bloquear la posición vertical del amperímetro
+    
 */
 
 package com.lushprojects.circuitjs1.client;
+
+
+
 
 import com.lushprojects.circuitjs1.client.util.Locale;
 
@@ -40,6 +47,11 @@ class ProbeElm extends CircuitElm {
     final int TP_PER = 7;
     final int TP_PWI = 8;
     final int TP_DUT = 9; //mark to space ratio
+
+        // ---- NUEVO ----
+    int lockY = -1;     // coordenada Y bloqueada
+    boolean locked = false;
+    // ----------------
     
     public ProbeElm(int xx, int yy) { super(xx, yy);
     	meter = TP_VOL;
@@ -48,6 +60,9 @@ class ProbeElm extends CircuitElm {
     	flags = FLAG_SHOWVOLTAGE | FLAG_CIRCLE;
     	scale = SCALE_AUTO;
 	resistance = 1e7;
+    // ---- NUEVO ----
+    lockY = 320; // se bloquea en la posición inicial
+    // ----------------
     }
     public ProbeElm(int xa, int ya, int xb, int yb, int f,
 		    StringTokenizer st) {
@@ -59,11 +74,14 @@ class ProbeElm extends CircuitElm {
 	    meter = Integer.parseInt(st.nextToken()); // get meter type from saved dump
 	    scale = Integer.parseInt(st.nextToken());
 	    resistance = Double.parseDouble(st.nextToken());
-	} catch (Exception e) {}
+        lockY = Integer.parseInt(st.nextToken());
+	} catch (Exception e) {
+        lockY = 320;
+    }
     }
     int getDumpType() { return 'p'; }
     String dump() {
-        return super.dump() + " " + meter + " " + scale + " " + resistance;
+        return super.dump() + " " + meter + " " + scale + " " + resistance+" "+lockY;
     }
     String getMeter(){
         switch (meter) {
@@ -116,6 +134,8 @@ class ProbeElm extends CircuitElm {
 
     void draw(Graphics g) {
 	g.save();
+    // ---- NUEVO: comprobación de bloqueo ----
+    locked = ( lockY != -1 && point1.y != lockY) && isBloqueoActivo();
 	int hs = (drawAsCircle()) ? circleSize : 8;
 	setBbox(point1, point2, hs);
 	boolean selected = needsHighlight();
@@ -278,12 +298,21 @@ class ProbeElm extends CircuitElm {
     }
 
     void stamp() {
+    // ---- NUEVO ----
+    if (locked){
+        	    sim.stampResistor(nodes[0], nodes[1], 0); 
+        return;}
+    // ----------------
 	if (resistance != 0)
 	    sim.stampResistor(nodes[0], nodes[1], resistance);
     }
 
     void getInfo(String arr[]) {
 	arr[0] = "voltmeter";
+    if (locked) {
+        arr[1] = "⚠ posición incorrecta";
+        return;
+    }
 	arr[1] = "Vd = " + getVoltageText(getVoltageDiff());
     }
     boolean getConnection(int n1, int n2) { return (resistance != 0); }

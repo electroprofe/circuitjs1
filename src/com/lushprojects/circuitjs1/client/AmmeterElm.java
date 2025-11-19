@@ -18,9 +18,12 @@
     
     AmmeterElm by Bill Collis
     
+    javier Bloqueado - Modificaciones para permitir bloquear la posición vertical del amperímetro
+    
 */
 
 package com.lushprojects.circuitjs1.client;
+import com.lushprojects.circuitjs1.client.StringTokenizer;
 
 import com.lushprojects.circuitjs1.client.util.Locale;
 
@@ -39,10 +42,18 @@ class AmmeterElm extends CircuitElm {
         double currents[];
         boolean increasingI=true, decreasingI=true;
 
+        // ---- NUEVO ----
+        int lockY = -1;     // coordenada Y bloqueada
+        boolean locked = false;
+        // ----------------
+
     public AmmeterElm(int xx, int yy) { 
         super(xx, yy); 
         flags = FLAG_SHOWCURRENT|FLAG_CIRCLE;
         scale = SCALE_AUTO;
+        // ---- NUEVO ----
+        lockY = 320; // se bloquea en la posición inicial
+        // ----------------
     }
     public AmmeterElm(int xa, int ya, int xb, int yb, int f,
                StringTokenizer st) {
@@ -52,9 +63,18 @@ class AmmeterElm extends CircuitElm {
         try {
             scale = Integer.parseInt(st.nextToken());
         } catch (Exception e) {}
+        // ---- NUEVO ----
+        try {
+            lockY = Integer.parseInt(st.nextToken());
+        } catch (Exception e) {
+            lockY = 320;
+        }
+        // ----------------
     }
     String dump() {
-            return super.dump() + " " + meter + " " + scale;
+            // ---- MODIFICADO ----
+            return super.dump() + " " + meter + " " + scale + " " + lockY;
+            // --------------------
     }
     String getMeter(){
         switch (meter) {
@@ -148,7 +168,15 @@ class AmmeterElm extends CircuitElm {
     Polygon arrowPoly;
     void draw(Graphics g) {
         super.draw(g);//BC required for highlighting
+        // ---- NUEVO: comprobación de bloqueo ----
+        locked = (lockY != -1 && point1.y != lockY) && isBloqueoActivo();
+        if (locked) {
+            g.setColor(selectColor);
+        } else {
         setVoltageColor(g, volts[0]);
+        }
+        // ----------------------------------------
+
 	double width = 4;
         if (!drawAsCircle()) {
             drawThickLine(g, point1, point2);
@@ -196,6 +224,9 @@ class AmmeterElm extends CircuitElm {
 
     int getDumpType() { return 370; }
     void stamp() {
+        // ---- NUEVO ----
+        if (locked) return;
+        // ----------------
         sim.stampVoltageSource(nodes[0], nodes[1], voltSource, 0);
     }
     boolean mustShowCurrent() {
@@ -204,6 +235,10 @@ class AmmeterElm extends CircuitElm {
     int getVoltageSourceCount() { return 1; }
     void getInfo(String arr[]) {
         arr[0] = "Ammeter";
+        if (locked) {
+            arr[1] = "⚠ posición incorrecta";
+            return;
+        }
         switch (meter) {
             case AM_VOL:
                 arr[1] = "I = " + getUnitText(current, "A");
