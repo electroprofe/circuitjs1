@@ -316,6 +316,7 @@ class RelayCoilElm extends CircuitElm {
 	double voltdiff = volts[nCoil1]-volts[nCoil3];
 	coilCurrent = ind.calculateCurrent(voltdiff);
     }
+    String getElmType() { return "relay"; }
     void getInfo(String arr[]) {
 	arr[0] = Locale.LS("relay");
 	if (i_position == 0)

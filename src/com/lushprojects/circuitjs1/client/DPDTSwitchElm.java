@@ -175,6 +175,7 @@ package com.lushprojects.circuitjs1.client;
 	// optimizing out this element is too complicated to be worth it (see #646)
 	boolean isRemovableWire() { return false; }
 
+	String getElmType() { return "switch (DPDT)"; }
 	void getInfo(String arr[]) {
 	    arr[0] = (poleCount == 2) ? "switch (DPDT)" : "switch (" + poleCount + "PDT)";
 	    int i;

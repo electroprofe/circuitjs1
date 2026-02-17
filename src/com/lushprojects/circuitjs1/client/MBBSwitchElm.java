@@ -174,6 +174,7 @@ package com.lushprojects.circuitjs1.client;
 	boolean isRemovableWire() { return false; }
 	boolean isWireEquivalent() { return true; }
 	
+	String getElmType() { return "switch (SPDT, MBB)"; }
 	void getInfo(String arr[]) {
 	    arr[0] = "switch (" + (link == 0 ? "S" : "D") + "PDT, MBB)";
 	    arr[1] = "I = " + getCurrentDText(getCurrent());

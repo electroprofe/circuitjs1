@@ -173,6 +173,7 @@ class SwitchElm extends CircuitElm {
             }
         }
     }
+    String getElmType() { return "switch (SPST)"; }
     void getInfo(String arr[]) {
 	arr[0] = (momentary) ? "push switch (SPST)" : "switch (SPST)";
 	if (position == 1) {

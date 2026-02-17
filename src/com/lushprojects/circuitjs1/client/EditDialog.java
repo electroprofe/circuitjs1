@@ -61,10 +61,9 @@ class EditDialog extends Dialog {
 		if (ce instanceof EditOptions) {
 		    title = "Other Options";
 		} else if (ce instanceof CircuitElm) {
-		    String info[] = new String[10];
-		    ((CircuitElm) ce).getInfo(info);
-		    if (info[0] != null)
-			title = "Edit " + info[0].substring(0, 1).toUpperCase() + info[0].substring(1);
+		    String name = ((CircuitElm) ce).getElmType();
+		    if (name != null)
+			title = "Edit " + name.substring(0, 1).toUpperCase() + name.substring(1);
 		}
 		setText(Locale.LS(title));
 		cframe = f;

@@ -151,6 +151,7 @@ class TextElm extends GraphicElm {
 	}
     }
 //    boolean isCenteredText() { return (flags & FLAG_CENTER) != 0; }
+    String getElmType() { return "text"; }
     void getInfo(String arr[]) {
 	arr[0] = text;
     }
