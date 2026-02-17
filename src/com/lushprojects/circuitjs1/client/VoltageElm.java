@@ -25,6 +25,7 @@ import com.lushprojects.circuitjs1.client.util.Locale;
 class VoltageElm extends CircuitElm {
     static final int FLAG_COS = 2;
     static final int FLAG_PULSE_DUTY = 4;
+    static final int FLAG_CIRCLE_SYMBOL = 8;
     int waveform;
     static final int WF_DC = 0;
     static final int WF_AC = 1;
@@ -141,12 +142,39 @@ class VoltageElm extends CircuitElm {
     final int circleSize = 17;
     void setPoints() {
 	super.setPoints();
-	calcLeads((waveform == WF_DC || waveform == WF_VAR) ? 8 : circleSize*2);
+	if (waveform == WF_DC && (flags & FLAG_CIRCLE_SYMBOL) != 0)
+	    calcLeads(circleSize*2);
+	else
+	    calcLeads((waveform == WF_DC || waveform == WF_VAR) ? 8 : circleSize*2);
     }
     void draw(Graphics g) {
 	setBbox(x, y, x2, y2);
 	draw2Leads(g);
-	if (waveform == WF_DC) {
+	if (waveform == WF_DC && (flags & FLAG_CIRCLE_SYMBOL) != 0) {
+	    setBbox(point1, point2, circleSize);
+	    interpPoint(lead1, lead2, ps1, .5);
+	    int xc = ps1.x; int yc = ps1.y;
+	    g.setColor(needsHighlight() ? selectColor : Color.gray);
+	    setPowerColor(g, false);
+	    drawThickCircle(g, xc, yc, circleSize);
+	    adjustBbox(xc-circleSize, yc-circleSize,
+		       xc+circleSize, yc+circleSize);
+	    // draw + and - signs inside the circle
+	    int signSize = 4;
+	    double plusPos = 0.74;
+	    double minusPos = 0.26;
+	    // + sign: perpendicular bar
+	    interpPoint2(lead1, lead2, ps1, ps2, plusPos, signSize);
+	    drawThickLine(g, ps1, ps2);
+	    // + sign: along-axis bar
+	    double delta = signSize / (circleSize * 2.0);
+	    Point pA = interpPoint(lead1, lead2, plusPos - delta);
+	    Point pB = interpPoint(lead1, lead2, plusPos + delta);
+	    drawThickLine(g, pA, pB);
+	    // - sign: perpendicular bar only
+	    interpPoint2(lead1, lead2, ps1, ps2, minusPos, signSize);
+	    drawThickLine(g, ps1, ps2);
+	} else if (waveform == WF_DC) {
 	    setVoltageColor(g, volts[0]);
 	    setPowerColor(g, false);
 	    interpPoint2(lead1, lead2, ps1, ps2, 0, 10);
@@ -175,7 +203,7 @@ class VoltageElm extends CircuitElm {
 	}
 	updateDotCount();
 	if (sim.dragElm != this) {
-	    if (waveform == WF_DC)
+	    if (waveform == WF_DC && (flags & FLAG_CIRCLE_SYMBOL) == 0)
 		drawDots(g, point1, point2, curcount);
 	    else {
 		drawDots(g, point1, lead1, curcount);
@@ -317,6 +345,11 @@ class VoltageElm extends CircuitElm {
 	}
 	if (n == 2)
 	    return new EditInfo("DC Offset (V)", bias, -20, 20);
+	if (n == 3 && waveform == WF_DC) {
+	    EditInfo ei = new EditInfo("", 0, -1, -1);
+	    ei.checkbox = new Checkbox("Circle Symbol", (flags & FLAG_CIRCLE_SYMBOL) != 0);
+	    return ei;
+	}
 	if (waveform == WF_DC || waveform == WF_NOISE)
 	    return null;
 	if (n == 3)
@@ -334,7 +367,11 @@ class VoltageElm extends CircuitElm {
 	    maxVoltage = ei.value;
 	if (n == 2)
 	    bias = ei.value;
-	if (n == 3) {
+	if (n == 3 && waveform == WF_DC && ei.checkbox != null) {
+	    flags = ei.changeFlag(flags, FLAG_CIRCLE_SYMBOL);
+	    setPoints();
+	}
+	if (n == 3 && waveform != WF_DC) {
 	    // adjust time zero to maintain continuity ind the waveform
 	    // even though the frequency has changed.
 	    double oldfreq = frequency;
