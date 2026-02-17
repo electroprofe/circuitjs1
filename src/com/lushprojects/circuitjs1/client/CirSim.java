@@ -3930,7 +3930,7 @@ MouseOutHandler, MouseWheelHandler {
     					new MyCommand("circuits", "setup "+file+" " + title)));
     				if (file.equals(startCircuit) && startLabel == null) {
     				    startLabel = title;
-    				    titleLabel.setText(title);
+    				    setCircuitTitle(title);
     				}
     				if (first && startCircuit == null) {
     					startCircuit = file;
@@ -3947,17 +3947,22 @@ MouseOutHandler, MouseWheelHandler {
     void readCircuit(String text, int flags) {
 	readCircuit(text.getBytes(), flags);
 	if ((flags & RC_KEEP_TITLE) == 0)
-	    titleLabel.setText(null);
+	    setCircuitTitle(null);
     }
 
     void readCircuit(String text) {
 	readCircuit(text.getBytes(), 0);
-	titleLabel.setText(null);
+	setCircuitTitle(null);
     }
 
+    static final String baseTitle = "Circuit Simulator";
+
     void setCircuitTitle(String s) {
-	if (s != null)
-	    titleLabel.setText(s);
+	titleLabel.setText(s);
+	if (s != null && s.length() > 0)
+	    Document.get().setTitle(s + " - " + baseTitle);
+	else
+	    Document.get().setTitle(baseTitle);
     }
     
 	void readSetupFile(String str, String title) {
@@ -3966,7 +3971,7 @@ MouseOutHandler, MouseWheelHandler {
 		String url=GWT.getModuleBaseURL()+"circuits/"+str; // +"?v="+random.nextInt(); 
 		loadFileFromURL(url);
 		if (title != null)
-		    titleLabel.setText(title);
+		    setCircuitTitle(title);
 		unsavedChanges = false;
 		ExportAsLocalFileDialog.setLastFileName(null);
 	}
