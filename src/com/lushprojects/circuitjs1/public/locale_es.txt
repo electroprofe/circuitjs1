@@ -703,6 +703,7 @@
 "Options"="Opciones"
 "Oscillators"="Osciladores"
 "Other Options..."="Otras opciones..."
+"Other Options"="Otras opciones"
 "Other Passive Circuits"="Otros circuitos pasivos"
 "Output Current Limit (A)"="Límite de corriente de salida (A)"
 "Output Function"="Función de salida"

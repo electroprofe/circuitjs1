@@ -728,6 +728,7 @@
 "Options"="옵션"
 "Oscillators"="발진기"
 "Other Options..."="기타 옵션..."
+"Other Options"="기타 옵션"
 "Other Passive Circuits"="기타 수동 회로"
 "Output Current Limit (A)"="출력 전류 제한 (A)"
 "Output Function"="출력 함수"
