@@ -33,12 +33,14 @@ package com.lushprojects.circuitjs1.client;
 	    super(xx, yy);
 	    noDiagonal = true;
 	    inputCount = 2;
-	    
+	    allocNodes();
+	    setupVolts();
+
 	    // copy defaults from last gate edited
 	    highVoltage = lastHighVoltage;
 	    if (lastSchmitt)
 		flags |= FLAG_SCHMITT;
-	    
+
 	    setSize(sim.smallGridCheckItem.getState() ? 1 : 2);
 	}
 	public GateElm(int xa, int ya, int xb, int yb, int f,
