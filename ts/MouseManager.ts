@@ -100,6 +100,16 @@ export class MouseManager {
     private toolbarDragAnchorX: number = 0;
     private toolbarDragAnchorY: number = 0;
 
+    // ---- NUEVO: helper de bloqueo de subcircuitos ----
+    // Devuelve true si el elemento es un subcircuito y el bloqueo global está activo.
+    // Se usa en los puntos donde el usuario podría seleccionar/arrastrar el subcircuito.
+    private isLockedSubcircuit(ce: CircuitElm | null): boolean {
+	if (ce == null || !CirSim.isBloqueoActivo())
+	    return false;
+	return ce.isSubcircuitElm && ce.isSubcircuitElm();
+    }
+    // ---------------------------------------------------
+
     constructor(sim: CirSim, ui: any) {
 	this.sim = sim;
 	this.ui = ui;
@@ -157,19 +167,11 @@ export class MouseManager {
 	    const midY = 0.5 * (touch1.clientY + touch2.clientY);
 
 	    if (e.touches.length > 1) {
-		// A second finger landing (whether or not the first already dispatched its
-		// own mousedown below) means this is a pinch/pan gesture, not a click or
-		// double-click: cancel any element placement the first finger may have
-		// started -- otherwise it keeps getting resized to follow the pinch
-		// midpoint in touchmove and gets committed to the circuit on touchend --
-		// and switch to two-finger drag-all instead of dispatching another
-		// synthetic mousedown (which would just restart element placement at the
-		// new midpoint using whatever mode is currently active).
 		if (this.dragElm != null) {
 		    this.dragElm.delete();
 		    this.dragElm = null;
 		}
-		lastTap = 0; // a multi-touch gesture is never part of a double-tap sequence
+		lastTap = 0;
 		this.twoFingerTouch(midX, midY - cv.getBoundingClientRect().top);
 		return;
 	    }
@@ -201,8 +203,6 @@ export class MouseManager {
 	    e.preventDefault();
 	    const touch1 = e.touches[0];
 	    const touch2 = e.touches[e.touches.length - 1];
-	    // a fingertip always wobbles a little: ignore one-finger movement until it passes
-	    // 10px, so a held finger neither cancels the long press nor drags what it's on
 	    if (e.touches.length === 1 && !moved) {
 		if (Math.hypot(touch1.clientX - startX, touch1.clientY - startY) <= 10)
 		    return;
@@ -239,8 +239,6 @@ export class MouseManager {
 	return this.toolbarDragClass != null;
     }
 
-    // re-place the element being dragged, e.g. when shift is pressed/released
-    // without any mouse movement
     toolbarDragOrientationChanged(vertical: boolean): void {
 	if (this.toolbarDragClass == null || this.dragElm == null)
 	    return;
@@ -300,8 +298,6 @@ export class MouseManager {
 	    this.tempMouseMode = MouseManager.MODE_ADD_ELM;
 	    this.dragging = true;
 	}
-	// (re)place the element at the anchor point; gives it a fixed default length/
-	// orientation since there's no drag-to-size gesture on the circuit area here
 	if (this.dragElm != null)
 	    this.dragElm.dragPlace(this.toolbarDragAnchorX, this.toolbarDragAnchorY, this.toolbarDragVertical);
 	this.sim.repaint();
@@ -314,7 +310,7 @@ export class MouseManager {
 	this.toolbarDragClass = null;
 	this.toolbarDragActive = false;
 	if (!wasActive)
-	    return; // no real drag happened; let the normal click switch modes as before
+	    return;
 	let createdElm: CircuitElm | null = null;
 	if (this.dragElm != null) {
 	    if (this.dragElm.creationFailed()) {
@@ -340,8 +336,6 @@ export class MouseManager {
 	    this.editCreatedElm(createdElm);
     }
 
-    // automatically bring up the property editor for a newly-created element,
-    // or close the editor for some other element if this one doesn't want it
     private editCreatedElm(elm: CircuitElm): void {
 	if (elm.showPropertiesOnCreate() && this.sim.showPropsOnCreate &&
 	    !this.ui.isReadOnly())
@@ -353,7 +347,7 @@ export class MouseManager {
     private doSwitch(x: number, y: number): boolean {
 	if (this.mouseElm == null || !this.mouseElm.isSwitchElm())
 	    return false;
-	const se = this.mouseElm as any; // SwitchElm
+	const se = this.mouseElm as any;
 	if (!se.getSwitchRect().contains(x, y))
 	    return false;
 	se.toggle();
@@ -385,8 +379,6 @@ export class MouseManager {
 	    this.dragSplitter(ex, ey);
 	    return;
 	}
-	// mouse was pressed in one of the scopes at the bottom (scopeSelected isn't updated
-	// while dragging), so don't drag the element it's plotting
 	if (this.sim.scopeManager.scopeSelected !== -1) {
 	    this.sim.repaint();
 	    return;
@@ -400,10 +392,16 @@ export class MouseManager {
 	let changed = false;
 	if (this.dragElm != null) {
 	    this.dragElm.drag(gx, gy);
-	    // now that we're actually dragging out a new element, don't leave whatever
-	    // was hovered before still looking highlighted underneath it
 	    this.setMouseElm(null);
 	}
+	// ---- NUEVO: si el elemento bajo el cursor es un subcircuito bloqueado,
+	// no permitir arrastrarlo; solo se permite panear el lienzo (DRAG_ALL).
+	if (this.tempMouseMode !== MouseManager.MODE_DRAG_ALL &&
+	    this.isLockedSubcircuit(this.mouseElm)) {
+	    this.sim.repaint();
+	    return;
+	}
+	// ------------------------------------------------------------
 	let success = true;
 	switch (this.tempMouseMode) {
 	case MouseManager.MODE_DRAG_ALL:
@@ -427,7 +425,6 @@ export class MouseManager {
 	    if (this.mouseElm == null)
 		this.selectArea(gx, gy, e.shiftKey);
 	    else if (!this.ui.isReadOnly()) {
-		// wait short delay before dragging — fixes accidental drags on mobile
 		if (Date.now() - this.mouseDownTime < 150)
 		    return;
 
@@ -528,14 +525,15 @@ export class MouseManager {
 	const dx = x - this.dragGridX;
 	const dy = y - this.dragGridY;
 	if (dx === 0 && dy === 0) {
-	    // don't leave mouseElm selected if we selected it above
 	    if (me) this.mouseElm!.setSelected(false);
 	    return false;
 	}
 	let allowed = true;
 
-	// check if moves are allowed
+	// ---- NUEVO: los subcircuitos bloqueados no participan en el arrastre ----
 	for (const ce of this.ui.elmList) {
+	    if (this.isLockedSubcircuit(ce))
+		continue;
 	    if (ce.isSelected() && !ce.allowMove(dx, dy))
 		allowed = false;
 	    if (!allowed) break;
@@ -543,12 +541,14 @@ export class MouseManager {
 
 	if (allowed) {
 	    for (const ce of this.ui.elmList) {
+		if (this.isLockedSubcircuit(ce))
+		    continue;
 		if (ce.isSelected()) {
 		    ce.move(dx, dy);
 		    this.dragMovedElms.add(ce);
 		}
 	    }
-	    // move connected routed wires' shared posts
+	    // ----------------------------------------------------------------------
 	    if (this.sim.sim.routedWireMap != null) {
 		for (const ce of this.ui.elmList) {
 		    if (!ce.isSelected()) continue;
@@ -563,7 +563,6 @@ export class MouseManager {
 	    this.sim.needAnalyze();
 	}
 
-	// don't leave mouseElm selected if we selected it above
 	if (me) this.mouseElm!.setSelected(false);
 
 	return allowed;
@@ -580,9 +579,12 @@ export class MouseManager {
 	if (dx === 0 && dy === 0) return;
 
 	if (all) {
-	    // go through all elms
 	    for (let i = 0; i < this.ui.elmList.length; i++) {
 		const e: CircuitElm = this.ui.elmList[i];
+		// ---- NUEVO: no mover posts de subcircuitos bloqueados ----
+		if (this.isLockedSubcircuit(e))
+		    continue;
+		// ---------------------------------------------------------
 		let p = 0;
 		if (e.x === this.dragGridX && e.y === this.dragGridY)
 		    p = 0;
@@ -594,7 +596,6 @@ export class MouseManager {
 	    }
 	} else {
 	    this.mouseElm!.movePoint(this.draggingPost, dx, dy);
-	    // move connected routed wires' shared posts
 	    if (this.sim.sim.routedWireMap != null) {
 		const conns = this.sim.sim.routedWireMap.get(this.mouseElm);
 		if (conns != null) {
@@ -622,8 +623,6 @@ export class MouseManager {
 	    this.sim.needAnalyze();
     }
 
-    // Split any WireElm (including RoutedWireElm) whose interior contains (px, py).
-    // Returns true if any wire was split.
     private splitWireAt(px: number, py: number, exclude?: Set<CircuitElm>): boolean {
 	let split = false;
 	for (let i = this.ui.elmList.length - 1; i >= 0; i--) {
@@ -642,9 +641,6 @@ export class MouseManager {
 	return split;
     }
 
-    // Split the lead stub of any non-wire element whose lead contains (px, py).
-    // Moves the element's post to the split point and inserts a wire for the remainder.
-    // Returns true if any lead was split.
     private splitLeadsAt(px: number, py: number, exclude?: Set<CircuitElm>): boolean {
 	let split = false;
 	for (let i = this.ui.elmList.length - 1; i >= 0; i--) {
@@ -665,8 +661,6 @@ export class MouseManager {
 	return split;
     }
 
-    // Split any wire or element lead whose interior contains (px, py),
-    // skipping elements in exclude.
     private splitAt(px: number, py: number, exclude?: Set<CircuitElm>): boolean {
 	const a = this.splitWireAt(px, py, exclude);
 	const b = this.splitLeadsAt(px, py, exclude);
@@ -674,7 +668,6 @@ export class MouseManager {
     }
 
     private selectArea(x: number, y: number, add: boolean): void {
-	// an area selection means the user is selecting a group of elements, not editing one
 	if (CirSim.editDialog != null)
 	    CirSim.editDialog.closeDialog();
 	const x1 = Math.min(x, this.initDragGridX);
@@ -683,6 +676,10 @@ export class MouseManager {
 	const y2 = Math.max(y, this.initDragGridY);
 	this.selectedArea = new Rectangle(x1, y1, x2 - x1, y2 - y1);
 	for (const ce of this.ui.elmList) {
+	    // ---- NUEVO: no seleccionar subcircuitos bloqueados con el recuadro ----
+	    if (this.isLockedSubcircuit(ce))
+		continue;
+	    // ------------------------------------------------------------------------
 	    ce.selectRect(this.selectedArea, add);
 	}
 	this.enableDisableMenuItems();
@@ -718,7 +715,6 @@ export class MouseManager {
 	    for (let i = 0; i < this.sim.adjustables.length; i++)
 		this.sim.adjustables[i].setMouseElm(ce);
 	}
-	// highlight all elements on the same net when Shift+hovering over a wire
 	if (ce != null && ce.isRemovableWire() && this.sim.sim.nodeList != null && this.netHighlightKeyHeld) {
 	    this.highlightedNode = ce.getNode(0);
 	} else {
@@ -731,7 +727,6 @@ export class MouseManager {
     updateNetHighlight(): void {
 	const ce = this.mouseElm;
 	if (ce != null && ce.isRemovableWire() && this.netHighlightKeyHeld) {
-	    // force full analysis if pending so node info is up to date
 	    if (this.sim.sim.needsStamp) {
 		try {
 		    this.sim.sim.preStampAndStampCircuit();
@@ -739,7 +734,6 @@ export class MouseManager {
 		    this.sim.sim.stop("Exception in stampCircuit()", null);
 		}
 	    }
-
 	    if (this.sim.sim.nodeList != null)
 		this.highlightedNode = ce.getNode(0);
 	} else {
@@ -765,7 +759,8 @@ export class MouseManager {
 	    return false;
 	const isOverSplitter =
 	    x >= 0 && x < this.sim.circuitArea.width &&
-	    y >= this.sim.circuitArea.height - 5 && y < this.sim.circuitArea.height;
+	    y >= 0 && y < this.sim.circuitArea.height &&
+	    y >= this.sim.circuitArea.height - 5;
 	if (isOverSplitter !== this.mouseWasOverSplitter) {
 	    if (isOverSplitter)
 		this.sim.setCursorStyle("cursorSplitter");
@@ -778,7 +773,6 @@ export class MouseManager {
 
     private onMouseMove(e: MouseEvent): void {
 	e.preventDefault();
-	// a toolbar drag-and-drop in progress is tracked at the document level instead
 	if (this.isToolbarDragPending())
 	    return;
 	const canvas = this.ui.cv as HTMLCanvasElement;
@@ -792,7 +786,6 @@ export class MouseManager {
 	this.sim.scopeManager.scopeMenuSelected = -1;
     }
 
-    // convert screen coordinates to grid coordinates by inverting circuit transform
     inverseTransformX(x: number): number {
 	return Math.floor((x - this.sim.transform[4]) / this.sim.transform[0]);
     }
@@ -801,7 +794,6 @@ export class MouseManager {
 	return Math.floor((y - this.sim.transform[5]) / this.sim.transform[3]);
     }
 
-    // convert grid coordinates to screen coordinates
     transformX(x: number): number {
 	return Math.floor(x * this.sim.transform[0] + this.sim.transform[4]);
     }
@@ -810,8 +802,6 @@ export class MouseManager {
 	return Math.floor(y * this.sim.transform[3] + this.sim.transform[5]);
     }
 
-    // need to break this out into a separate routine to handle selection,
-    // since we don't get mouse move events on mobile
     mouseSelect(e: MouseEvent): void {
 	let newMouseElm: CircuitElm | null = null;
 	const canvas = this.ui.cv as HTMLCanvasElement;
@@ -835,12 +825,17 @@ export class MouseManager {
 	    return;
 	}
 
+	// 1) buscar por bounding box
 	if (this.sim.circuitArea.contains(sx, sy)) {
 	    if (this.mouseElm != null && this.mouseElm.getHandleGrabbedClose(gx, gy, MouseManager.POSTGRABSQ, MouseManager.MINPOSTGRABSIZE) >= 0) {
 		newMouseElm = this.mouseElm;
 	    } else {
 		let bestDist = 100000000;
 		for (const ce of this.ui.elmList) {
+		    // ---- NUEVO: ignorar subcircuitos bloqueados ----
+		    if (this.isLockedSubcircuit(ce))
+			continue;
+		    // ------------------------------------------------
 		    if (ce.boundingBox.contains(gx, gy)) {
 			const dist = ce.getMouseDistance(gx, gy);
 			if (dist >= 0 && dist < bestDist) {
@@ -853,6 +848,7 @@ export class MouseManager {
 	}
 	this.sim.scopeManager.scopeSelected = -1;
 	if (newMouseElm == null) {
+	    // 2) buscar por scope
 	    for (let i = 0; i < this.sim.scopeManager.scopeCount; i++) {
 		const s = this.sim.scopeManager.scopes[i];
 		if (s.rect.contains(sx, sy)) {
@@ -861,28 +857,33 @@ export class MouseManager {
 		    this.sim.scopeManager.scopeSelected = i;
 		}
 	    }
-	    // the mouse pointer was not in any of the bounding boxes, but we
-	    // might still be close to a post
-	    for (const ce of this.ui.elmList) {
-		if (this.mouseMode === MouseManager.MODE_DRAG_POST) {
-		    if (ce.getHandleGrabbedClose(gx, gy, MouseManager.POSTGRABSQ, 0) > 0) {
-			newMouseElm = ce;
-			break;
+	    // 3) buscar por post cercano (solo si no hemos encontrado nada antes)
+	    if (newMouseElm == null) {
+		outer:
+		for (const ce of this.ui.elmList) {
+		    // ---- NUEVO: ignorar subcircuitos bloqueados ----
+		    if (this.isLockedSubcircuit(ce))
+			continue;
+		    // ------------------------------------------------
+		    if (this.mouseMode === MouseManager.MODE_DRAG_POST) {
+			if (ce.getHandleGrabbedClose(gx, gy, MouseManager.POSTGRABSQ, 0) > 0) {
+			    newMouseElm = ce;
+			    break outer;
+			}
 		    }
-		}
-		const jn = ce.getPostCount();
-		for (let j = 0; j < jn; j++) {
-		    const pt = ce.getPost(j);
-		    if (Graphics.distanceSq(pt.x, pt.y, gx, gy) < 26) {
-			newMouseElm = ce;
-			this.mousePost = j;
-			break;
+		    const jn = ce.getPostCount();
+		    for (let j = 0; j < jn; j++) {
+			const pt = ce.getPost(j);
+			if (Graphics.distanceSq(pt.x, pt.y, gx, gy) < 26) {
+			    newMouseElm = ce;
+			    this.mousePost = j;
+			    break outer; // ---- ARREGLADO: antes faltaba este break ----
+			}
 		    }
 		}
 	    }
 	} else {
 	    this.mousePost = -1;
-	    // look for post close to the mouse pointer
 	    for (let i = 0; i < newMouseElm.getPostCount(); i++) {
 		const pt = newMouseElm.getPost(i);
 		if (Graphics.distanceSq(pt.x, pt.y, gx, gy) < 26)
@@ -903,7 +904,6 @@ export class MouseManager {
 	}
     }
 
-    // show a context menu popup, clamping to canvas bounds and repositioning submenus
     private showContextPanel(x: number, y: number): void {
 	this.watchSubmenus(true);
 	const panel = this.ui.contextPanel as HTMLElement;
@@ -920,7 +920,6 @@ export class MouseManager {
 	}
     }
 
-    // watch for submenu popups and reposition them if they extend below the viewport
     private watchSubmenus(watch: boolean): void {
 	if (watch) {
 	    const vh = window.innerHeight;
@@ -1012,12 +1011,9 @@ export class MouseManager {
 	}
     }
 
-    // check if the user can create sliders for this element
     private sliderItemEnabled(elm: CircuitElm): boolean {
-	// prevent confusion
 	if (elm.isVarRailElm() || elm.isPotElm())
 	    return false;
-
 	for (let i = 0; ; i++) {
 	    const ei = elm.getEditInfo(i);
 	    if (ei == null)
@@ -1029,14 +1025,12 @@ export class MouseManager {
 
     private onClick(e: MouseEvent): void {
 	e.preventDefault();
-	if (e.button === 1) // middle button
+	if (e.button === 1)
 	    this.scrollValues(e.clientX, e.clientY, 0);
     }
 
     private onDoubleClick(e: MouseEvent): void {
 	e.preventDefault();
-	// double-clicking (double-tapping) a scope, docked or floating, opens the scope popup,
-	// same as right-click/long press; it shouldn't edit the scope's element
 	if (this.sim.scopeManager.scopeSelected !== -1 || (this.mouseElm != null && this.mouseElm.isScopeElm())) {
 	    this.doPopupMenu();
 	    return;
@@ -1053,13 +1047,8 @@ export class MouseManager {
 
     private onMouseOut(e: MouseEvent): void {
 	this.mouseCursorX = -1;
-	// if the mouse leaves the canvas while dragging (e.g. dragged off the edge of the
-	// browser window), we may never get a mouseup event, so end the drag now instead of
-	// getting stuck thinking we're still dragging (which for MODE_DRAG_ALL would mean
-	// the view keeps panning as the mouse moves, even after the button is released).
 	if (this.mouseDragging)
 	    this.endDrag();
-	// don't leave the last hovered element highlighted after the mouse has left
 	this.mousePost = -1;
 	this.scopePlotRoles.clear();
 	this.setMouseElm(null);
@@ -1075,13 +1064,10 @@ export class MouseManager {
     private onMouseDown(e: MouseEvent): void {
 	e.preventDefault();
 
-	// make sure we have keyboard focus so all shortcuts work. The canvas isn't focusable, and
-	// preventDefault() above stops the browser from moving focus here, so when we're in an
-	// iframe, focus would otherwise stay in the parent page if that's where it was.
 	window.focus();
 	(document.activeElement as HTMLElement | null)?.blur?.();
 
-	this.sim.stopElm = null; // if stopped, allow user to select other elements to fix circuit
+	this.sim.stopElm = null;
 	const canvas = this.ui.cv as HTMLCanvasElement;
 	const ex = this.getCanvasX(canvas, e.clientX);
 	const ey = this.getCanvasY(canvas, e.clientY);
@@ -1091,15 +1077,25 @@ export class MouseManager {
 	this.mouseDownScreenX = ex;
 	this.mouseDownScreenY = ey;
 
-	// maybe someone did copy in another window?  should really do this when
-	// window receives focus
 	this.sim.commands.enablePaste();
 
-	if (e.button !== 0 && e.button !== 1) // not left or middle
+	if (e.button !== 0 && e.button !== 1)
 	    return;
 
 	// set mouseElm in case we are on mobile
 	this.mouseSelect(e);
+
+	// ---- NUEVO: si el elemento bajo el cursor es un subcircuito bloqueado,
+	// no iniciar ningún arrastre.  Solo se permite el paneo con el botón medio
+	// o con Alt (que se resuelve más abajo a MODE_DRAG_ALL).
+	if (this.isLockedSubcircuit(this.mouseElm) &&
+	    e.button === 0 && !e.altKey && !e.ctrlKey && !e.metaKey) {
+	    this.mouseElm = null;
+	    this.dragElm = null;
+	    this.mouseDragging = false;
+	    return;
+	}
+	// --------------------------------------------------------------------------
 
 	this.mouseDragging = true;
 	this.didSwitch = false;
@@ -1109,7 +1105,6 @@ export class MouseManager {
 	    return;
 	}
 	if (e.button === 0) {
-	    // left mouse
 	    this.tempMouseMode = this.mouseMode;
 	    if (e.altKey && e.metaKey)
 		this.tempMouseMode = MouseManager.MODE_DRAG_COLUMN;
@@ -1142,7 +1137,6 @@ export class MouseManager {
 	    return;
 	}
 
-	// start drag-to-measure if clicking inside a scope
 	if (!this.sim.modalDialogIsShowing()) {
 	    for (let i = 0; i < this.sim.scopeManager.scopeCount; i++)
 		this.sim.scopeManager.scopes[i].mousePressed(ex, ey);
@@ -1152,7 +1146,6 @@ export class MouseManager {
 	    }
 	}
 
-	// alt-drag or middle-mouse-drag a scope's selected plot up/down while in manual scale mode
 	if (!this.sim.modalDialogIsShowing() && Scope.cursorScope != null &&
 		(e.button === 1 || (e.button === 0 && e.altKey)) &&
 		Scope.cursorScope.startDragPlotY(ex, ey))
@@ -1161,13 +1154,10 @@ export class MouseManager {
 	const gx = this.inverseTransformX(ex);
 	const gy = this.inverseTransformY(ey);
 	if (this.doSwitch(gx, gy)) {
-	    // do this BEFORE we change the mouse mode to MODE_DRAG_POST!  Or else logic inputs
-	    // will add dots to the whole circuit when we click on them!
 	    this.didSwitch = true;
 	    return;
 	}
 
-	// IES - Grab resize handles in select mode if they are far enough apart and you are on top of them
 	if (this.tempMouseMode === MouseManager.MODE_SELECT && this.mouseElm != null && !this.ui.isReadOnly() &&
 	    this.mouseElm.getHandleGrabbedClose(gx, gy, MouseManager.POSTGRABSQ, MouseManager.MINPOSTGRABSIZE) >= 0 &&
 	    !this.anySelectedButMouse())
@@ -1182,14 +1172,16 @@ export class MouseManager {
 	this.dragging = true;
 	this.dragMovedElms.clear();
 
-	// capture elements for DragRow/DragColumn at mouse-down so we don't
-	// pick up new elements as we sweep over them
 	if (this.tempMouseMode === MouseManager.MODE_DRAG_ROW || this.tempMouseMode === MouseManager.MODE_DRAG_COLUMN) {
 	    this.dragRowColElms  = [];
 	    this.dragRowColPosts = [];
 	    const sgx = this.snapGrid(gx);
 	    const sgy = this.snapGrid(gy);
 	    for (const ce of this.ui.elmList) {
+		// ---- NUEVO: no capturar subcircuitos bloqueados en DragRow/Column ----
+		if (this.isLockedSubcircuit(ce))
+		    continue;
+		// ---------------------------------------------------------------------
 		if (this.tempMouseMode === MouseManager.MODE_DRAG_ROW) {
 		    if (ce.y === sgy) { this.dragRowColElms.push(ce); this.dragRowColPosts.push(0); }
 		    if (ce.y2 === sgy) { this.dragRowColElms.push(ce); this.dragRowColPosts.push(1); }
@@ -1216,8 +1208,6 @@ export class MouseManager {
 	this.sim.updateToolbar();
     }
 
-    // check/uncheck/enable/disable menu items as appropriate when menu bar clicked on, or when
-    // right mouse menu accessed.  also displays shortcuts as a side effect
     doMainMenuChecks(): void {
 	const c = this.ui.mainMenuItems.length;
 	for (let i = 0; i < c; i++) {
@@ -1229,44 +1219,29 @@ export class MouseManager {
 	this.sim.menus.combineAllItem.setEnabled(this.sim.scopeManager.scopeCount > 1);
 	this.sim.menus.separateAllItem.setEnabled(this.sim.scopeManager.scopeCount > 0);
 
-	// also update the subcircuit menu if necessary
 	if (MouseManager.lastSubcircuitMenuUpdate !== SubcircuitModel.sequenceNumber)
 	    this.sim.composeSubcircuitMenu();
     }
 
     private onMouseUp(e: MouseEvent): void {
 	e.preventDefault();
-	// a toolbar drag-and-drop in progress is finished by the document-level handler instead
 	if (this.isToolbarDragPending())
 	    return;
 
-	// click to clear selection (but not on a right-click, e.g. from a context-menu mouseup)
 	if (this.tempMouseMode === MouseManager.MODE_SELECT && this.selectedArea == null && e.button === 0)
 	    this.clearSelection();
 
-	// cmd-click = split wire
 	if (this.tempMouseMode === MouseManager.MODE_DRAG_POST && this.draggingPost === -1)
 	    this.doSplit(this.mouseElm);
 
-	// figure out, before endDrag() clears drag state, whether this mouseup is a plain
-	// click (not a drag, not a modified click used for some other gesture) and if so
-	// what it landed on, so we can update the (non-modal) property editor accordingly:
-	// clicking an element brings up its editor, clicking empty space closes it, and
-	// creating a new element (checked after endDrag(), below) brings up its editor too.
 	const wasPlainClick = e.button === 0 && !this.didSwitch &&
 	    !e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey;
 	let clickedElm: CircuitElm | null = null;
 	let clickedEmpty = false;
 	if (wasPlainClick) {
-	    // use the last tracked cursor position rather than this event's coordinates: on
-	    // touch devices the synthetic "mouseup" dispatched from touchend carries no
-	    // clientX/clientY, which would otherwise always read as a big (spurious) drag
 	    const dx = this.mouseCursorX - this.mouseDownScreenX;
 	    const dy = this.mouseCursorY - this.mouseDownScreenY;
-	    // (clicking a scope at the bottom is ignored here; it shouldn't bring up the
-	    // editor for the scope's element, or close the editor)
 	    if (dx * dx + dy * dy < 16 && this.sim.scopeManager.scopeSelected === -1) {
-		// didn't move (much) since mousedown, so it's a click, not a drag
 		if (this.mouseElm != null && !this.mouseElm.isSwitchElm())
 		    clickedElm = this.mouseElm;
 		else if (this.mouseElm == null)
@@ -1280,8 +1255,6 @@ export class MouseManager {
 	    this.editCreatedElm(createdElm);
 	} else if (clickedElm != null && !(e as any).fromTouch && !this.ui.isReadOnly() &&
 		   this.sim.showPropsOnClick) {
-	    // (tapping an element on a touch screen doesn't bring up its properties)
-	    // (clicking the element whose properties are already showing dismisses them)
 	    if (CirSim.editDialog != null && CirSim.editDialog.elm === clickedElm)
 		CirSim.editDialog.closeDialog();
 	    else if (clickedElm.hasProperties())
@@ -1293,8 +1266,6 @@ export class MouseManager {
 	}
     }
 
-    // common cleanup for ending a drag, whether via mouseup or the mouse leaving the canvas.
-    // returns the element that was just created (added to elmList), if any.
     private endDrag(): CircuitElm | null {
 	this.mouseDragging = false;
 	Scope.dragStartTime = -1;
@@ -1304,14 +1275,11 @@ export class MouseManager {
 	this.selectedArea = null;
 	this.dragging = false;
 	let circuitChanged = false;
-	// auto-split wires when a post is dragged onto a wire's interior
 	if (this.draggingPost >= 0 && this.mouseElm != null) {
 	    const p = this.mouseElm.getPost(this.draggingPost);
 	    if (p != null && this.splitAt(p.x, p.y))
 		circuitChanged = true;
 	}
-	// auto-split wires/leads that moved elements' posts were dropped onto.
-	// Moved elements aren't split themselves, since they moved together.
 	if (this.dragMovedElms.size > 0) {
 	    const posts: Point[] = [];
 	    for (const ce of this.dragMovedElms) {
@@ -1334,8 +1302,6 @@ export class MouseManager {
 	}
 	let createdElm: CircuitElm | null = null;
 	if (this.dragElm != null) {
-	    // if the element is zero size then don't create it
-	    // IES - and disable any previous selection
 	    if (this.dragElm.creationFailed()) {
 		this.dragElm.delete();
 		if (this.mouseMode === MouseManager.MODE_SELECT || this.mouseMode === MouseManager.MODE_DRAG_SELECTED)
@@ -1343,7 +1309,6 @@ export class MouseManager {
 		this.ui.toolbar.setModeLabel(Locale.LS("Press and hold mouse to create circuit element"));
 		this.dragElm = null;
 	    } else {
-		// auto-split wires at the new element's endpoints before adding it
 		this.splitAt(this.dragElm.x, this.dragElm.y);
 		this.splitAt(this.dragElm.x2, this.dragElm.y2);
 		this.ui.elmList.push(this.dragElm);
@@ -1370,8 +1335,6 @@ export class MouseManager {
     private onMouseWheel(e: WheelEvent): void {
 	e.preventDefault();
 
-	// once we start zooming, don't allow other uses of mouse wheel for a while
-	// so we don't accidentally edit a resistor value while zooming
 	let zoomOnly = Date.now() < this.zoomTime + 1000;
 
 	if (this.ui.isReadOnly() || !this.sim.menus.mouseWheelEditCheckItem.getState())
@@ -1410,8 +1373,6 @@ export class MouseManager {
 	const cy = this.inverseTransformY(constY);
 	this.sim.transform[0] = this.sim.transform[3] = newScale;
 
-	// adjust translation to keep center of screen constant
-	// inverse transform = (x-t4)/t0
 	this.sim.transform[4] = constX - cx * newScale;
 	this.sim.transform[5] = constY - cy * newScale;
     }

@@ -20,15 +20,56 @@
 import { CircuitElm } from "./CircuitElm";
 import { CurrentElm } from "./CurrentElm";
 import { Graphics } from "./Graphics";
+import { Color } from "./Color";
 import { Locale } from "./Locale";
 import { StringTokenizer } from "./StringTokenizer";
+import { CircuitXMLSerializer } from "./CircuitXMLSerializer";
+import { CircuitXMLDeserializer } from "./CircuitXMLDeserializer";
+import { parseIntStrict } from "./NumberParse";
+import { CirSim } from "./CirSim";
 import { VAL_R, UNITS_OHMS } from "./ScopeConstants";
 
 export class OhmMeterElm extends CurrentElm {
+    // ---- NUEVO ----
+    lockY: number = -1;
+    locked: boolean = false;
+    // ----------------
+
     constructor(xx: number, yy: number);
     constructor(xa: number, ya: number, xb: number, yb: number, f: number, st: StringTokenizer);
     constructor(xa: number, ya: number, xb?: number, yb?: number, f?: number, st?: StringTokenizer) {
         super(xa, ya, xb, yb, f, st);
+        // ---- NUEVO ----
+        if (xb === undefined) {
+            this.lockY = 320;
+        } else {
+            try {
+                this.lockY = parseIntStrict(st!.nextToken());
+            } catch (e) {
+                this.lockY = 320;
+            }
+        }
+        // ----------------
+    }
+
+    // ---- NUEVO ----
+    isBloqueoActivo(): boolean {
+        return CirSim.isBloqueoActivo();
+    }
+    // ----------------
+
+    dumpXml(doc: Document, elem: Element): void {
+        super.dumpXml(doc, elem);
+        // ---- NUEVO ----
+        CircuitXMLSerializer.dumpAttr(elem, "lk", this.lockY);
+        // ----------------
+    }
+
+    undumpXml(xml: CircuitXMLDeserializer): void {
+        super.undumpXml(xml);
+        // ---- NUEVO ----
+        this.lockY = xml.parseIntAttr("lk", 320);
+        // ----------------
     }
 
     showPropertiesOnCreate(): boolean { return false; }
@@ -41,8 +82,16 @@ export class OhmMeterElm extends CurrentElm {
 
     draw(g: Graphics): void {
         const cr = 12;
+
+        // ---- NUEVO: comprobación de bloqueo ----
+        this.locked = (this.lockY !== -1 && this.point1.y !== this.lockY) && this.isBloqueoActivo();
+        // ----------------------------------------
+
         this.draw2Leads(g);
-        this.setVoltageColor(g, (this.nodes[0].v + this.nodes[1].v) / 2);
+        if (this.locked)
+            g.setColor(Color.red);
+        else
+            this.setVoltageColor(g, (this.nodes[0].v + this.nodes[1].v) / 2);
         this.setPowerColor(g, false);
 
         CircuitElm.drawThickCircle(g, this.center!.x, this.center!.y, cr);
@@ -50,13 +99,31 @@ export class OhmMeterElm extends CurrentElm {
 
         this.setBbox(this.point1, this.point2, cr);
         this.doDots(g);
-        if (this.showValues() && this.current !== 0) {
-            const s = CircuitElm.getShortUnitText(this.getVoltageDiff() / this.current, Locale.ohmString);
-            if (this.dx === 0 || this.dy === 0)
+
+        if (this.showValues()) {
+            let s: string;
+            if (this.locked)
+                s = "\u2014"; // em dash
+            else if (this.current !== 0)
+                s = CircuitElm.getShortUnitText(this.getVoltageDiff() / this.current, Locale.ohmString);
+            else
+                s = "";
+            if (s.length > 0 && (this.dx === 0 || this.dy === 0))
                 this.drawValues(g, s, cr);
         }
         this.drawPosts(g);
     }
+
+    // ---- NUEVO: si está bloqueado, no inyecta corriente y no mide ----
+    stamp(): void {
+        if (this.locked) {
+            // en lugar de la fuente de corriente, una R enorme (circuito abierto)
+            CircuitElm.sim.stampResistor(this.nodes[0], this.nodes[1], 1e12);
+            return;
+        }
+        super.stamp();
+    }
+    // --------------------------------------------------------------------
 
     getScopeValue(x: number): number {
         return (x === VAL_R) ? this.getVoltageDiff() / this.current : super.getScopeValue(x);
@@ -72,8 +139,14 @@ export class OhmMeterElm extends CurrentElm {
 
     getInfo(arr: string[]): void {
         arr[0] = "ohmmeter";
+        // ---- NUEVO ----
+        if (this.locked) {
+            arr[1] = "\u26A0 Posición Incorrecta";
+            return;
+        }
+        // ----------------
         if (this.current === 0)
-            arr[1] = "R = ∞";
+            arr[1] = "R = \u221E";
         else
             arr[1] = "R = " + CircuitElm.getUnitText(this.getVoltageDiff() / this.current, Locale.ohmString);
     }

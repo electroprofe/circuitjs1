@@ -12,7 +12,7 @@ mkdir site
 cp -r "$DIR/ts/dist/." site
 
 ( cd site
-  mv circuitjs "circuitjs$num"
+  mv circuitjs "circuitjs$num" 
 
   # circuitjs.html (and any other top-level page) hardcodes references like
   # "circuitjs/font/fontello.css" and script src="./circuitjs/...js" pointing

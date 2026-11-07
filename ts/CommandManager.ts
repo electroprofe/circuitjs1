@@ -122,8 +122,6 @@ export class CommandManager {
             CirSim.dialogShowing = new (window as any).SubcircuitDialog(this.app);
             CirSim.dialogShowing.show();
         }
-        // "search" (Edit menu / toolbar) and "commandpalette" (double-tap Shift, / shortcut,
-        // or the palette itself) both open the same command palette.
         if (item == "search" || item == "commandpalette") {
             CirSim.commandPalette = new CommandPalette(this.app);
             CirSim.commandPalette.show();
@@ -139,12 +137,10 @@ export class CommandManager {
         if (item == "runstop")
             this.app.setSimRunning(!this.app.simIsRunning());
 
-        // if the mouse is hovering over an element, and a shortcut key is pressed, operate on that element (treat it like a context menu item selection)
         if (menu == "key" && this.app.mouse.getMouseElm() != null) {
             this.app.mouse.menuElm = this.app.mouse.getMouseElm();
             menu = "elm";
         }
-        // keep menuElm for the floating scope menu too: it is how scopepop finds its scope
         if (menu != "elm" && menu != "scopepop")
             this.app.mouse.menuElm = null;
 
@@ -240,7 +236,6 @@ export class CommandManager {
                 this.app.snapGrid(this.app.mouse.menuElm.y + 50));
             this.app.elmList.push(newScope);
             newScope.setScopeElm(this.app.mouse.menuElm);
-            // need to rebuild scopeElmArr
             this.app.needAnalyze();
         }
 
@@ -263,8 +258,6 @@ export class CommandManager {
             if (sm.menuScope != -1)
                 s = sm.scopes[sm.menuScope];
             else
-                // floating scope: use the element the menu was opened on.  mouseElm is cleared
-                // once the mouse leaves the canvas to reach the menu
                 s = (this.app.mouse.menuElm as any)?.elmScope;
 
             if (item == "dock") {
@@ -275,14 +268,12 @@ export class CommandManager {
                 elm.clearElmScope();
                 sm.scopes[sm.scopeCount].position = sm.scopeCount;
                 sm.scopeCount++;
-                // remove the floating scope element itself.  (doDelete() would miss it, since
-                // it's not the mouse element any more, and would delete any selected elements)
                 const i = this.app.elmList.indexOf(elm);
                 if (i >= 0) {
                     elm.delete();
                     this.app.elmList.splice(i, 1);
                 }
-                this.app.needAnalyze();      // need to rebuild scopeElmArr
+                this.app.needAnalyze();
             }
             if (item == "undock") {
                 const elm = s.getElm();
@@ -291,14 +282,13 @@ export class CommandManager {
                     this.app.snapGrid(elm.y + 50));
                 this.app.elmList.push(newScope);
                 newScope.setElmScope(sm.scopes[sm.menuScope]);
-                // remove scope from list.  setupScopes() will fix the positions
                 for (let i = sm.menuScope; i < sm.scopeCount; i++)
                     sm.scopes[i] = sm.scopes[i+1];
                 sm.scopeCount--;
-                this.app.needAnalyze();      // need to rebuild scopeElmArr
+                this.app.needAnalyze();
             }
             if (item == "remove")
-                s.setElm(null);  // setupScopes() will clean this up
+                s.setElm(null);
             if (item == "removeplot")
                 s.removePlot(sm.menuPlot);
             if (item == "speed2")
@@ -336,7 +326,6 @@ export class CommandManager {
             this.app.menus.readSetupFile("blank.txt", "Blank Circuit");
         }
 
-        // IES: Moved from itemStateChanged()
         if (menu == "main") {
             if (contextPanel != null) {
                 contextPanel.remove();
@@ -360,7 +349,6 @@ export class CommandManager {
                 this.app.setMouseMode(MouseManager.MODE_SELECT);
 
             this.app.updateToolbar();
-
             this.app.mouse.tempMouseMode = this.app.mouse.mouseMode;
         }
         if (item == "fullscreen") {
@@ -456,11 +444,9 @@ export class CommandManager {
                 maxy = Math.max(ce.y, Math.max(ce.y2, maxy));
             }
         }
-        // Java's int division truncates toward zero; replicate that here so cx/cy stay integers.
         return { cx: Math.trunc((minx + maxx) / 2), cy: Math.trunc((miny + maxy) / 2), count };
     }
 
-    // mirror horizontally (flip left-right)
     mirrorX(): void {
         const fi = this.prepareFlip();
         const center2 = fi.cx * 2;
@@ -470,7 +456,6 @@ export class CommandManager {
         this.app.needAnalyze();
     }
 
-    // mirror vertically (flip top-bottom)
     mirrorY(): void {
         const fi = this.prepareFlip();
         const center2 = fi.cy * 2;
@@ -480,7 +465,6 @@ export class CommandManager {
         this.app.needAnalyze();
     }
 
-    // rotate 90 degrees counterclockwise: a diagonal flip followed by a vertical flip cancels out the mirroring and leaves a pure rotation
     rotateCCW(): void {
         const fi = this.prepareFlip();
         const center2 = fi.cy * 2;
@@ -494,7 +478,6 @@ export class CommandManager {
         this.app.needAnalyze();
     }
 
-    // rotate 90 degrees clockwise: same two flips as rotateCCW(), in the opposite order, giving the opposite rotation direction
     rotateCW(): void {
         const fi = this.prepareFlip();
         const center2 = fi.cy * 2;
@@ -547,12 +530,17 @@ export class CommandManager {
         }
     }
 
+    // ---- MODIFICADO: comprobar isDeletable() antes de borrar ----
     willDelete(ce: any): boolean {
+        // los elementos marcados como no borrables (p. ej. ExplosionElm)
+        // se quedan en el circuito aunque estén seleccionados o bajo el ratón
+        if (typeof ce.isDeletable === "function" && !ce.isDeletable())
+            return false;
         return ce.isSelected() || ce.isMouseElm();
     }
+    // --------------------------------------------------------------
 
     copyOfSelectedElms(): string {
-        // Build an XML document string containing the selected elements
         const doc = document.implementation.createDocument(null, "cir", null);
         const root = doc.documentElement;
 
@@ -566,6 +554,10 @@ export class CommandManager {
         for (let i = this.app.elmList.length - 1; i >= 0; i--) {
             const ce = this.app.elmList[i];
             ce.dumpXmlModel?.(doc);
+            // ---- MODIFICADO: no copiar elementos no borrables ----
+            if (typeof ce.isDeletable === "function" && !ce.isDeletable())
+                continue;
+            // --------------------------------------------------------
             if (ce.isSelected() && !ce.isScopeElm?.()) {
                 const elem = doc.createElement(ce.getXmlDumpType());
                 ce.dumpXml?.(doc, elem);
@@ -603,7 +595,6 @@ export class CommandManager {
         this.app.mouse.clearSelection();
         let oldbb: Rectangle | null = null;
 
-        // get old bounding box
         for (const ce of this.app.elmList) {
             const bb = ce.getBoundingBox();
             if (oldbb != null)
@@ -612,12 +603,9 @@ export class CommandManager {
                 oldbb = bb;
         }
 
-        // add new items
         const oldsz = this.app.elmList.length;
         let flags = CircuitLoader.RC_RETAIN;
 
-        // don't recenter circuit if we're going to paste in place because that will change the transform
-        // in fact, don't ever recenter circuit, unless old circuit was empty
         if (oldsz > 0)
             flags |= CircuitLoader.RC_NO_CENTER;
 
@@ -628,7 +616,6 @@ export class CommandManager {
             this.app.loader.readCircuit(this.clipboard, flags);
         }
 
-        // select new items and get their bounding box
         let newbb: Rectangle | null = null;
         for (let i = oldsz; i != this.app.elmList.length; i++) {
             const ce = this.app.elmList[i];
@@ -641,13 +628,11 @@ export class CommandManager {
         }
 
         if (oldbb != null && newbb != null) {
-            // find a place on the edge for new items
             let dx = 0, dy = 0;
             const spacew = this.app.circuitArea.width - oldbb.width - newbb.width;
             const spaceh = this.app.circuitArea.height - oldbb.height - newbb.height;
 
             if (!oldbb.intersects(newbb)) {
-                // old coordinates may be really far away so move them to same origin as current circuit
                 dx = this.app.snapGrid(oldbb.x - newbb.x);
                 dy = this.app.snapGrid(oldbb.y - newbb.y);
             }
@@ -657,7 +642,6 @@ export class CommandManager {
             else
                 dy = this.app.snapGrid(oldbb.y + oldbb.height - newbb.y + this.app.gridSize);
 
-            // move new items near the mouse if possible
             if (this.app.mouse.mouseCursorX > 0 && this.app.circuitArea.contains(this.app.mouse.mouseCursorX, this.app.mouse.mouseCursorY)) {
                 const gx = this.app.mouse.inverseTransformX(this.app.mouse.mouseCursorX);
                 const gy = this.app.mouse.inverseTransformY(this.app.mouse.mouseCursorY);
@@ -674,7 +658,6 @@ export class CommandManager {
                 }
             }
 
-            // move the new items
             for (let i = oldsz; i != this.app.elmList.length; i++)
                 this.app.elmList[i].move(dx, dy);
         }

@@ -15,6 +15,8 @@
 
     You should have received a copy of the GNU General Public License
     along with CircuitJS1.  If not, see <http://www.gnu.org/licenses/>.
+
+    javier Bloqueado - Modificaciones para permitir bloquear la posición vertical del amperímetro
 */
 
 // much of this was adapted from Bill Collis's code in TestPointElm.java
@@ -31,7 +33,8 @@ import { Locale } from "./Locale";
 import { CircuitXMLSerializer } from "./CircuitXMLSerializer";
 import { CircuitXMLDeserializer } from "./CircuitXMLDeserializer";
 import { parseIntStrict, parseFloatStrict } from "./NumberParse";
-import { CustomLogicModel } from "./CustomLogicModel";
+import { CirSim } from "./CirSim";
+import { Color } from "./Color";
 
 export class ProbeElm extends CircuitElm {
     static readonly FLAG_SHOWVOLTAGE = 1;
@@ -85,6 +88,11 @@ export class ProbeElm extends CircuitElm {
     // optional name, drawn next to the reading and usable as v(label) in an expression
     label: string = "";
 
+    // ---- NUEVO: bloqueo por posición ----
+    lockY: number = -1;
+    locked: boolean = false;
+    // ------------------------------------
+
     constructor(xx: number, yy: number);
     constructor(xa: number, ya: number, xb: number, yb: number, f: number, st: StringTokenizer);
     constructor(xa: number, ya: number, xb?: number, yb?: number, f?: number, st?: StringTokenizer) {
@@ -94,18 +102,33 @@ export class ProbeElm extends CircuitElm {
             this.flags = ProbeElm.FLAG_SHOWVOLTAGE | ProbeElm.FLAG_CIRCLE;
             this.scale = CircuitElm.SCALE_AUTO;
             this.resistance = 1e7;
+            // ---- NUEVO ----
+            this.lockY = 320;
+            // ----------------
         } else {
             super(xa, ya, xb, yb!, f!);
             this.meter = ProbeElm.TP_VOL;
             this.scale = CircuitElm.SCALE_AUTO;
             this.resistance = 0;
             try {
-                this.meter     = parseIntStrict(st!.nextToken());
-                this.scale     = parseIntStrict(st!.nextToken());
+                this.meter      = parseIntStrict(st!.nextToken());
+                this.scale      = parseIntStrict(st!.nextToken());
                 this.resistance = parseFloatStrict(st!.nextToken());
-            } catch (e) {}
+                // ---- NUEVO ----
+                try { this.lockY = parseIntStrict(st!.nextToken()); }
+                catch (e) { this.lockY = 320; }
+                // ----------------
+            } catch (e) {
+                this.lockY = 320;
+            }
         }
     }
+
+    // ---- NUEVO ----
+    isBloqueoActivo(): boolean {
+        return CirSim.isBloqueoActivo();
+    }
+    // ----------------
 
     getDumpType(): number { return 'p'.charCodeAt(0); }
     isProbeElm(): boolean { return true; }
@@ -117,6 +140,9 @@ export class ProbeElm extends CircuitElm {
         CircuitXMLSerializer.dumpAttr(elem, "re", this.resistance);
         if (this.label.length > 0)
             CircuitXMLSerializer.dumpAttr(elem, "lb", this.label);
+        // ---- NUEVO ----
+        CircuitXMLSerializer.dumpAttr(elem, "lk", this.lockY);
+        // ----------------
     }
 
     undumpXml(xml: CircuitXMLDeserializer): void {
@@ -126,6 +152,9 @@ export class ProbeElm extends CircuitElm {
         this.scale      = xml.parseIntAttr("sc", this.scale);
         this.resistance = xml.parseDoubleAttr("re", 0);
         this.label      = xml.parseStringAttr("lb", "") ?? "";
+        // ---- NUEVO ----
+        this.lockY      = xml.parseIntAttr("lk", 320);
+        // ----------------
     }
 
     setPoints(): void {
@@ -172,6 +201,9 @@ export class ProbeElm extends CircuitElm {
 
     draw(g: Graphics): void {
         g.save();
+        // ---- NUEVO: comprobación de bloqueo ----
+        this.locked = (this.lockY !== -1 && this.point1.y !== this.lockY) && this.isBloqueoActivo();
+        // ----------------------------------------
         const role = CircuitElm.app.mouse.scopePlotRoles.get(this);
         const showCircle = this.drawAsCircle() && (role == null || role === "");
         const hs = showCircle ? ProbeElm.circleSize : 8;
@@ -181,11 +213,16 @@ export class ProbeElm extends CircuitElm {
         if (showCircle)
             len = ProbeElm.circleSize * 2;
         this.calcLeads(len);
-        this.setVoltageColor(g, this.nodes[0].v);
+        if (this.locked) {
+            g.setColor(Color.red);   // rojo (selectColor = cian por defecto; ajusta si quieres Color.red)
+        } else {
+            this.setVoltageColor(g, this.nodes[0].v);
+        }
         if (selected)
             g.setColor(CircuitElm.selectColor);
         CircuitElm.drawThickLine(g, this.point1, this.lead1!);
-        this.setVoltageColor(g, this.nodes[1].v);
+        if (!this.locked)
+            this.setVoltageColor(g, this.nodes[1].v);
         if (selected)
             g.setColor(CircuitElm.selectColor);
         CircuitElm.drawThickLine(g, this.lead2!, this.point2);
@@ -196,18 +233,22 @@ export class ProbeElm extends CircuitElm {
         const hsv = showCircle ? ProbeElm.circleSize + 3 : 4;
         if (this.mustShowVoltage()) {
             let s = "";
-            switch (this.meter) {
-                case ProbeElm.TP_VOL: s = CircuitElm.getUnitTextWithScale(this.getVoltageDiff(), "V",       this.scale); break;
-                case ProbeElm.TP_RMS: s = CircuitElm.getUnitTextWithScale(this.rmsV,             "V(rms)", this.scale); break;
-                case ProbeElm.TP_AVG: s = CircuitElm.getUnitTextWithScale(this.avgV,             "V(avg)", this.scale); break;
-                case ProbeElm.TP_MAX: s = CircuitElm.getUnitTextWithScale(this.lastMaxV,          "Vpk",   this.scale); break;
-                case ProbeElm.TP_MIN: s = CircuitElm.getUnitTextWithScale(this.lastMinV,          "Vmin",  this.scale); break;
-                case ProbeElm.TP_P2P: s = CircuitElm.getUnitTextWithScale(this.lastMaxV - this.lastMinV, "Vp2p", this.scale); break;
-                case ProbeElm.TP_BIN: s = this.binaryLevel + ""; break;
-                case ProbeElm.TP_FRQ: s = CircuitElm.getUnitText(this.frequency, "Hz"); break;
-                case ProbeElm.TP_PER: break;
-                case ProbeElm.TP_PWI: s = CircuitElm.getUnitText(this.pulseWidth, "s"); break;
-                case ProbeElm.TP_DUT: s = CircuitElm.showFormat.format(this.dutyCycle); break;
+            if (this.locked) {
+                s = "\u2014"; // em dash
+            } else {
+                switch (this.meter) {
+                    case ProbeElm.TP_VOL: s = CircuitElm.getUnitTextWithScale(this.getVoltageDiff(), "V",       this.scale); break;
+                    case ProbeElm.TP_RMS: s = CircuitElm.getUnitTextWithScale(this.rmsV,             "V(rms)", this.scale); break;
+                    case ProbeElm.TP_AVG: s = CircuitElm.getUnitTextWithScale(this.avgV,             "V(avg)", this.scale); break;
+                    case ProbeElm.TP_MAX: s = CircuitElm.getUnitTextWithScale(this.lastMaxV,          "Vpk",   this.scale); break;
+                    case ProbeElm.TP_MIN: s = CircuitElm.getUnitTextWithScale(this.lastMinV,          "Vmin",  this.scale); break;
+                    case ProbeElm.TP_P2P: s = CircuitElm.getUnitTextWithScale(this.lastMaxV - this.lastMinV, "Vp2p", this.scale); break;
+                    case ProbeElm.TP_BIN: s = this.binaryLevel + ""; break;
+                    case ProbeElm.TP_FRQ: s = CircuitElm.getUnitText(this.frequency, "Hz"); break;
+                    case ProbeElm.TP_PER: break;
+                    case ProbeElm.TP_PWI: s = CircuitElm.getUnitText(this.pulseWidth, "s"); break;
+                    case ProbeElm.TP_DUT: s = CircuitElm.showFormat.format(this.dutyCycle); break;
+                }
             }
             if (this.label.length > 0)
                 s = this.label + " " + s;
@@ -237,6 +278,28 @@ export class ProbeElm extends CircuitElm {
         if (CircuitElm.sim.timeStepCount === this.lastStepCount)
             return;
         this.lastStepCount = CircuitElm.sim.timeStepCount;
+
+        // ---- NUEVO: si está mal colocado, no acumular medidas ----
+        if (this.locked) {
+            this.rmsV = 0;
+            this.avgV = 0;
+            this.total = 0;
+            this.totalV = 0;
+            this.count = 0;
+            this.maxV = 0;
+            this.minV = 0;
+            this.lastMaxV = 0;
+            this.lastMinV = 0;
+            this.zerocount = 0;
+            this.period = 0;
+            this.pulseWidth = 0;
+            this.dutyCycle = 0;
+            this.binaryLevel = 0;
+            this.selectedValue = 0;
+            return;
+        }
+        // ---------------------------------------------------------
+
         this.count++;
         const v = this.getVoltageDiff();
         this.total += v * v;
@@ -246,8 +309,6 @@ export class ProbeElm extends CircuitElm {
         this.binaryLevel = (v < 2.5) ? 0 : 1;
 
         if (!this.started) {
-            // prime max/min tracking with the first sample instead of the stale defaults (0, increasingV==decreasingV==true),
-            // which could otherwise register a bogus transition on the first step
             this.started = true;
             this.maxV = this.minV = v;
             this.increasingV = true;
@@ -261,7 +322,6 @@ export class ProbeElm extends CircuitElm {
             this.decreasingV = false;
         }
         if (v < this.maxV && this.increasingV) {
-            // direction change: was going up, now going down
             this.lastMaxV     = this.maxV;
             this.periodLength = CircuitElm.sim.t - this.periodStart;
             this.periodStart  = CircuitElm.sim.t;
@@ -286,7 +346,6 @@ export class ProbeElm extends CircuitElm {
             this.decreasingV  = true;
         }
         if (v > this.minV && this.decreasingV) {
-            // direction change: was going down, now going up
             this.lastMinV    = this.minV;
             this.pulseStart  = CircuitElm.sim.t;
             this.maxV        = v;
@@ -320,17 +379,24 @@ export class ProbeElm extends CircuitElm {
     }
 
     stamp(): void {
+        // ---- MODIFICADO: siempre estampa su resistencia normal, esté o no
+        // bloqueado.  El voltímetro sigue conduciendo y no altera el circuito;
+        // simplemente no muestra la medida (ver stepFinished() y draw()).
         if (this.resistance !== 0)
             CircuitElm.sim.stampResistor(this.nodes[0], this.nodes[1], this.resistance);
+        // ----------------------------------------------------------------------
     }
 
     getInfo(arr: string[]): void {
         arr[0] = "voltmeter";
+        // ---- NUEVO ----
+        if (this.locked) {
+            arr[1] = "\u26A0 Posición Incorrecta";
+            return;
+        }
+        // ----------------
         let i = 1;
         arr[i++] = this.getMeterLine(this.meter);
-        // show the rest of the already-tracked values too, skipping whichever one is selected above.
-        // frequency is left out here because it isn't actually computed anywhere (see getMeterLine);
-        // binary value is left out to make room for average, since arr[] only has room for 10 entries total
         if (this.meter !== ProbeElm.TP_VOL) arr[i++] = this.getMeterLine(ProbeElm.TP_VOL);
         if (this.meter !== ProbeElm.TP_MAX) arr[i++] = this.getMeterLine(ProbeElm.TP_MAX);
         if (this.meter !== ProbeElm.TP_MIN) arr[i++] = this.getMeterLine(ProbeElm.TP_MIN);
@@ -375,8 +441,6 @@ export class ProbeElm extends CircuitElm {
             ei.choice.add("Min Voltage");
             ei.choice.add("P2P Voltage");
             ei.choice.add("Binary Value");
-            // TP_AVG's value isn't contiguous with the other meter constants shown here (it was
-            // appended after TP_DUT to avoid renumbering saved circuits), so map it explicitly.
             ei.choice.select(this.meterChoiceIndex(this.meter));
             return ei;
         }

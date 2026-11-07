@@ -16,7 +16,7 @@
     You should have received a copy of the GNU General Public License
     along with CircuitJS1.  If not, see <http://www.gnu.org/licenses/>.
 */
-
+import { AmmeterElm } from "./AmmeterElm";
 import { CirSim } from "./CirSim";
 import { Menus } from "./Menus";
 import { MouseManager } from "./MouseManager";
@@ -1124,6 +1124,10 @@ export class UIManager {
             this.app.transform[4] * scale,
             this.app.transform[5] * scale);
 
+        // --- INICIO: línea horizontal de bloqueo ---
+        this.app.drawLockLine(g);
+        // --- FIN ---
+
         perfmon.startContext("elm.draw()");
         try {
             for (const ce of this.elmList) {
@@ -1221,6 +1225,21 @@ export class UIManager {
         perfmon.stopContext();
 
         g.setColor(Color.white);
+
+        // ---- NUEVO: sustituir amperímetros fundidos por ExplosionElm ----
+        let replaced = false;
+        for (let i = this.app.elmList.length - 1; i >= 0; i--) {
+            const ce = this.app.elmList[i];
+            if (ce instanceof AmmeterElm && ce.shouldBeReplacedByExplosion()) {
+                const ex = ce.createExplosionReplacement();
+                this.app.elmList[i] = ex;
+                ce.delete();
+                replaced = true;
+            }
+        }
+        if (replaced)
+            this.app.needAnalyze();
+        // -----------------------------------------------------------------
 
         perfmon.stopContext(); // graphics
 

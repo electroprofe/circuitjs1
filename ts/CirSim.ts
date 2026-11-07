@@ -28,6 +28,7 @@ import { ElementFactory } from "./ElementFactory";
 import { StringTokenizer } from "./StringTokenizer";
 import { Rectangle } from "./Rectangle";
 import { Locale } from "./Locale";
+import { Color } from "./Color"; // ---- NUEVO ----
 import { CircuitXMLSerializer as CircuitXMLSerializer } from "./CircuitXMLSerializer";
 import { CustomLogicModel } from "./CustomLogicModel";
 import { DiodeModel } from "./DiodeModel";
@@ -189,10 +190,49 @@ export class CirSim {
     static xmlDumpTypeMap: Map<string, string> = new Map();
 
 
+    // ---- NUEVO: bloqueo global ----
+    // Equivalente a CirSim.isBloqueoActivo() en Java:
+    //   public static native boolean isBloqueoActivo() { return !!$wnd.CIRCUITJS_BLOQUEO; }
+    // Devuelve true si la variable global window.CIRCUITJS_BLOQUEO es "truthy".
+    static isBloqueoActivo(): boolean {
+        return true;//!!(window as any).CIRCUITJS_BLOQUEO;
+    }
+
+    // Helper para que MouseManager (y otros) consulten si un elemento debe
+    // ignorarse por el bloqueo.  Replica la lógica que en Java estaba diseminada
+    // por mouseDragged/selectArea/mouseSelect/onMouseDown: se ignoran los
+    // subcircuitos (CustomCompositeElm), y opcionalmente los elementos con
+    // lockY activo (amperímetro/voltímetro) si están fuera de su Y bloqueada.
+    isElmLocked(ce: any): boolean {
+        if (ce == null || !CirSim.isBloqueoActivo())
+            return false;
+        // subcircuitos (CustomCompositeElm / CompositeElm)
+        if (ce.isSubcircuitElm && ce.isSubcircuitElm())
+            return true;
+        // amperímetro/voltímetro con lockY activo y fuera de su posición
+        if (ce.lockY !== undefined && ce.lockY !== -1 &&
+            ce.point1 !== undefined && ce.point1.y !== ce.lockY)
+            return true;
+        return false;
+    }
+
+    // Dibuja la línea horizontal de bloqueo.  Llamar desde UIManager.updateCircuit()
+    // justo después de aplicar la transformación al contexto y antes de dibujar
+    // los elementos (equivale al bloque "INICIO DE LÍNEA HORIZONTAL" de tu Java).
+    drawLockLine(g: any): void {
+        if (!CirSim.isBloqueoActivo())
+            return;
+        g.setColor(Color.gray);
+        g.drawLine(0, 320, 600, 320);
+    }
+    // -------------------------------
+
+
     constructor() {
         CirSim.theApp = this;
         this.menus = new Menus();
         this.mouse = new MouseManager(this, null);
+        (window as any).CirSim = CirSim;
     }
 
     async init(): Promise<void> {
