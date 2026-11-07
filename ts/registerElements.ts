@@ -50,6 +50,7 @@ import { DelayBufferElm } from "./DelayBufferElm";
 import { DiacElm } from "./DiacElm";
 import { DiodeElm } from "./DiodeElm";
 import { ExtVoltageElm } from "./ExtVoltageElm";
+import { ExplosionElm } from "./ExplosionElm";
 import { FMElm } from "./FMElm";
 import { FullAdderElm } from "./FullAdderElm";
 import { FuseElm } from "./FuseElm";
@@ -203,6 +204,7 @@ export function registerElements(): void {
     ElementFactory.registerClass("DiacElm", DiacElm as any);
     ElementFactory.registerClass("DiodeElm", DiodeElm as any);
     ElementFactory.registerClass("ExtVoltageElm", ExtVoltageElm as any);
+    ElementFactory.registerClass("ExplosionElm", ExplosionElm as any);
     ElementFactory.registerClass("FMElm", FMElm as any);
     ElementFactory.registerClass("FullAdderElm", FullAdderElm as any);
     ElementFactory.registerClass("FuseElm", FuseElm as any);
@@ -351,6 +353,7 @@ export function registerElements(): void {
     CirSim.theApp.register("DelayBufferElm", new DelayBufferElm(0, 0));
     CirSim.theApp.register("DiacElm", new DiacElm(0, 0));
     CirSim.theApp.register("DiodeElm", new DiodeElm(0, 0));
+    CirSim.theApp.register("ExplosionElm", new ExplosionElm(0, 0));
     CirSim.theApp.register("ExtVoltageElm", new ExtVoltageElm(0, 0));
     CirSim.theApp.register("FMElm", new FMElm(0, 0));
     CirSim.theApp.register("FullAdderElm", new FullAdderElm(0, 0));

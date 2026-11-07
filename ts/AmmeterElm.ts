@@ -17,6 +17,8 @@
     along with CircuitJS1.  If not, see <http://www.gnu.org/licenses/>.
 
     AmmeterElm by Bill Collis
+
+    javier Bloqueado - Modificaciones para permitir bloquear la posición vertical del amperímetro
 */
 
 import { CircuitElm } from "./CircuitElm";
@@ -25,13 +27,15 @@ import { CircuitXMLDeserializer } from "./CircuitXMLDeserializer";
 import { Choice } from "./Choice";
 import { EditInfo } from "./EditInfo";
 import { Graphics } from "./Graphics";
+import { Color } from "./Color";
 import { Locale } from "./Locale";
 import { Point } from "./Point";
 import { Polygon } from "./Polygon";
 import { StringTokenizer } from "./StringTokenizer";
 import { VoltageSource } from "./VoltageSource";
-import { parseIntStrict } from "./NumberParse";
-import { CustomLogicModel } from "./CustomLogicModel";
+import { parseIntStrict, parseFloatStrict } from "./NumberParse";
+import { CirSim } from "./CirSim";
+import { ExplosionElm } from "./ExplosionElm";
 
 export class AmmeterElm extends CircuitElm {
     meter: number = 0;
@@ -59,6 +63,45 @@ export class AmmeterElm extends CircuitElm {
     increasingI: boolean = true;
     decreasingI: boolean = true;
 
+    // ---- NUEVO: bloqueo por posición ----
+    lockY: number = -1;       // coordenada Y bloqueada
+    locked: boolean = false;  // estado calculado en draw()
+    // ------------------------------------
+
+    // ---- NUEVO: fusible / explosión ----
+    maxCurrent: number = 20;      // umbral de fusión (A), editable
+    // ---- NUEVO: overlay para el GIF animado ----
+    overlayImg: HTMLImageElement | null = null;
+    // -------------------------------------------
+    blown: boolean = false;       // true si se ha fundido
+    explosionStart: number = 0;   // Date.now() cuando empezó la explosión
+    pendingReplacement: boolean = false; // ya programada la sustitución por ExplosionElm
+    static readonly EXPLOSION_DURATION_MS = 1000;
+    // ------------------------------------
+
+    // GIF de explosión (compartido entre instancias)
+    static explosionImage: HTMLImageElement | null = null;
+    static explosionImageLoading: boolean = false;
+
+    static loadExplosionImage(): void {
+        /*
+        if (AmmeterElm.explosionImage != null || AmmeterElm.explosionImageLoading)
+            return;
+        AmmeterElm.explosionImageLoading = true;
+        const img = new Image();
+        img.onload = () => {
+            AmmeterElm.explosionImage = img;
+            AmmeterElm.explosionImageLoading = false;
+            CirSim.console("GIF explosión cargado");
+        };
+        img.onerror = () => {
+            AmmeterElm.explosionImageLoading = false;
+            CirSim.console("No se pudo cargar images/explosion.gif");
+        };
+        img.src = "images/explosion.gif";
+        */
+    }
+
     constructor(xx: number, yy: number);
     constructor(xa: number, ya: number, xb: number, yb: number, f: number, st: StringTokenizer);
     constructor(xxOrXa: number, yyOrYa: number, xb?: number, yb?: number, f?: number, st?: StringTokenizer) {
@@ -66,6 +109,9 @@ export class AmmeterElm extends CircuitElm {
             super(xxOrXa, yyOrYa);
             this.flags = AmmeterElm.FLAG_SHOWCURRENT | AmmeterElm.FLAG_CIRCLE;
             this.scale = CircuitElm.SCALE_AUTO;
+            this.lockY = 320;
+            this.maxCurrent = 20;
+            AmmeterElm.loadExplosionImage();
         } else {
             super(xxOrXa, yyOrYa, xb, yb!, f!);
             this.scale = CircuitElm.SCALE_AUTO;
@@ -73,15 +119,42 @@ export class AmmeterElm extends CircuitElm {
             try {
                 this.scale = parseIntStrict(st!.nextToken());
             } catch (e) {}
+            try {
+                this.lockY = parseIntStrict(st!.nextToken());
+            } catch (e) {
+                this.lockY = 320;
+            }
+            this.maxCurrent = 20;
+            AmmeterElm.loadExplosionImage();
         }
     }
 
+    // ---- NUEVO ----
+    isBloqueoActivo(): boolean {
+        return CirSim.isBloqueoActivo();
+    }
+    // ----------------
+    delete(): void {
+        if (this.overlayImg != null) {
+            this.overlayImg.remove();
+            this.overlayImg = null;
+        }
+        super.delete();
+    }
+    // ---- NUEVO: marca de tiempo de la explosión ----
+    explosionTime: number = 0;  // Date.now() cuando se fundió
+    // ------------------------------------------------
     dumpXml(doc: Document, elem: Element): void {
         super.dumpXml(doc, elem);
         CircuitXMLSerializer.dumpAttr(elem, "me", this.meter);
         CircuitXMLSerializer.dumpAttr(elem, "sc", this.scale);
         if (this.label.length > 0)
             CircuitXMLSerializer.dumpAttr(elem, "lb", this.label);
+        CircuitXMLSerializer.dumpAttr(elem, "lk", this.lockY);
+        // ---- NUEVO: guardar maxCurrent (default 20) ----
+        if (this.maxCurrent !== 20)
+            CircuitXMLSerializer.dumpAttr(elem, "mc", this.maxCurrent);
+        // ------------------------------------------------
     }
 
     undumpXml(xml: CircuitXMLDeserializer): void {
@@ -89,6 +162,10 @@ export class AmmeterElm extends CircuitElm {
         this.meter = xml.parseIntAttr("me", this.meter);
         this.scale = xml.parseIntAttr("sc", this.scale);
         this.label = xml.parseStringAttr("lb", "") ?? "";
+        this.lockY = xml.parseIntAttr("lk", 320);
+        // ---- NUEVO: leer maxCurrent, default 20 si no está ----
+        this.maxCurrent = xml.parseDoubleAttr("mc", 20);
+        // ------------------------------------------------------
     }
 
     getMeter(): string {
@@ -111,6 +188,32 @@ export class AmmeterElm extends CircuitElm {
     }
 
     stepFinished(): void {
+        // ---- NUEVO: si está mal colocado, no acumular medidas ----
+        if (this.locked) {
+            this.rmsI = 0;
+            this.selectedValue = 0;
+            this.count = 0;
+            this.total = 0;
+            this.zerocount = 0;
+            return;
+        }
+        // ---------------------------------------------------------
+
+        // ---- NUEVO: detectar fusión ----
+        if (!this.blown && Math.abs(this.current) > this.maxCurrent) {
+            this.blown = true;
+            this.explosionStart = Date.now();
+            this.explosionTime  = this.explosionStart;   // <-- NUEVO
+            this.rmsI = 0;
+            this.selectedValue = 0;
+            this.count = 0;
+            this.total = 0;
+            this.zerocount = 0;
+            CirSim.theApp?.needAnalyze();
+            return;
+        }
+        // --------------------------------
+
         this.count++;
         this.total += this.current * this.current;
         if (this.current > this.maxI && this.increasingI) {
@@ -168,14 +271,27 @@ export class AmmeterElm extends CircuitElm {
 
     draw(g: Graphics): void {
         super.draw(g);
-        this.setVoltageColor(g, this.nodes[0].v);
+
+        // ---- NUEVO: comprobación de bloqueo ----
+        this.locked = (this.lockY !== -1 && this.point1.y !== this.lockY) && this.isBloqueoActivo();
+        const bad = this.locked || this.blown;
+        if (bad) {
+            g.setColor(Color.red);
+        } else {
+            this.setVoltageColor(g, this.nodes[0].v);
+        }
+        // ----------------------------------------
+
         let width = 4;
         if (!this.drawAsCircle()) {
             CircuitElm.drawThickLine(g, this.point1, this.point2);
             g.fillPolygon(this.arrowPoly);
         } else {
             this.calcLeads(this.circleSize * 2);
-            this.setVoltageColor(g, this.nodes[0].v);
+            if (!bad)
+                this.setVoltageColor(g, this.nodes[0].v);
+            else
+                g.setColor(Color.red);
             CircuitElm.drawThickLine(g, this.point1, this.lead1!);
             CircuitElm.drawThickLine(g, this.lead2!, this.point2);
 
@@ -186,7 +302,7 @@ export class AmmeterElm extends CircuitElm {
             g.setColor(CircuitElm.whiteColor);
             g.setFont(CircuitElm.unitsFont);
             const len = this.circleSize * 2;
-            const plusPoint = this.interpPoint(this.point1, this.point2, (this.dn / 2 - len / 2 - 4) / this.dn, -10 * this.dsign);
+            const plusPoint = this.interpPoint(this.point1, this.point2, (this.dn / 2 - len / 2 - 4) / this.dn, -10 * this.dsign) as Point;
             if (this.y2 > this.y) plusPoint.y += 4;
             if (this.y  > this.y2) plusPoint.y += 3;
             const w = Math.floor(g.context.measureText("+").width);
@@ -194,13 +310,57 @@ export class AmmeterElm extends CircuitElm {
             width = this.circleSize;
         }
 
+        // ---- NUEVO: gestionar el overlay del GIF ----
+        if (this.blown) {
+            const elapsed = Date.now() - this.explosionStart;
+            const  EXPLOSION_SIZE_PX = 320;  // <-- tamaño de la explosión en pantalla
+            if (elapsed < AmmeterElm.EXPLOSION_DURATION_MS) {
+                const size = EXPLOSION_SIZE_PX;
+                // crear el <img> si no existe
+                if (this.overlayImg == null) {
+                    const img = document.createElement("img");
+                    img.src = "images/explosion.gif";
+                    img.style.position = "absolute";
+                    img.style.pointerEvents = "none";
+                    img.style.zIndex = "1000";
+                    img.style.width  = size + "px";
+                    img.style.height = size + "px";
+                    document.body.appendChild(img);
+                    this.overlayImg = img;
+                }
+                // posicionar centrado en el amperímetro
+                const mouse = CircuitElm.app.mouse;
+                const canvas = CircuitElm.app.ui.cv as HTMLCanvasElement;
+                const rect = canvas.getBoundingClientRect();
+                const sx = mouse.transformX(this.center.x);
+                const sy = mouse.transformY(this.center.y);
+                this.overlayImg.style.left = (rect.left + sx - size / 1.7) + "px";
+                this.overlayImg.style.top  = (rect.top  + sy - size / 1.1) + "px";
+            } else {
+                if (this.overlayImg != null) {
+                    this.overlayImg.remove();
+                    this.overlayImg = null;
+                }
+            }
+        }
+        // -------------------------------------------
+
         this.doDots(g);
         this.setBbox(this.point1, this.point2, width);
+
+        // ---- NUEVO: mostrar "FUSIBLE" o "—" según estado ----
         let s = "A";
-        switch (this.meter) {
-        case AmmeterElm.AM_VOL: s = CircuitElm.getUnitTextWithScale(this.getCurrent(), "A", this.scale); break;
-        case AmmeterElm.AM_RMS: s = CircuitElm.getUnitTextWithScale(this.rmsI, "A(rms)", this.scale); break;
+        if (this.blown) {
+            s = "FUSIBLE";
+        } else if (this.locked) {
+            s = "\u2014"; // em dash
+        } else {
+            switch (this.meter) {
+            case AmmeterElm.AM_VOL: s = CircuitElm.getUnitTextWithScale(this.getCurrent(), "A", this.scale); break;
+            case AmmeterElm.AM_RMS: s = CircuitElm.getUnitTextWithScale(this.rmsI, "A(rms)", this.scale); break;
+            }
         }
+        // ---------------------------------------------------
 
         if (this.label.length > 0)
             s = this.label + " " + s;
@@ -216,7 +376,13 @@ export class AmmeterElm extends CircuitElm {
     }
 
     stamp(): void {
+        // SIEMPRE estampa la fuente de tensión (así la matriz no queda con
+        // filas vacías y la simulación no se detiene).
         CircuitElm.sim.stampVoltageSource(this.nodes[0], this.nodes[1], this.voltSource, 0);
+        // ---- NUEVO: si está fundido, R enorme en paralelo => circuito abierto ----
+        if (this.blown)
+            CircuitElm.sim.stampResistor(this.nodes[0], this.nodes[1], 1e12);
+        // ------------------------------------------------------------------------
     }
 
     mustShowCurrent(): boolean {
@@ -227,6 +393,14 @@ export class AmmeterElm extends CircuitElm {
 
     getInfo(arr: string[]): void {
         arr[0] = "Ammeter";
+        if (this.blown) {
+            arr[1] = "\u26A0 Amperímetro fundido";
+            return;
+        }
+        if (this.locked) {
+            arr[1] = "\u26A0 Posición Incorrecta";
+            return;
+        }
         switch (this.meter) {
         case AmmeterElm.AM_VOL: arr[1] = "I = "    + CircuitElm.getUnitText(this.current, "A"); break;
         case AmmeterElm.AM_RMS: arr[1] = "Irms = " + CircuitElm.getUnitText(this.rmsI, "A"); break;
@@ -236,13 +410,31 @@ export class AmmeterElm extends CircuitElm {
     getPower(): number { return 0; }
     getVoltageDiff(): number { return this.nodes[0].v; }
 
-    // do not optimize out, even though isWireEquivalent() is true
-    // (because we need current calculated every timestep)
     isWireEquivalent(): boolean { return true; }
 
     drawAsCircle(): boolean {
         return (this.flags & AmmeterElm.FLAG_CIRCLE) !== 0;
     }
+
+    // ---- NUEVO: tras la animación, sustituirse por ExplosionElm ----
+    // Lo llama UIManager.updateCircuit() una vez por frame, recorriendo elmList.
+    // Devuelve true si este elemento debe ser sustituido.
+    shouldBeReplacedByExplosion(): boolean {
+        if (!this.blown || this.pendingReplacement)
+            return false;
+        if (Date.now() - this.explosionStart < AmmeterElm.EXPLOSION_DURATION_MS)
+            return false;
+        this.pendingReplacement = true;
+        return true;
+    }
+
+    createExplosionReplacement(): ExplosionElm {
+        const ex = new ExplosionElm(this.x, this.y, this.x2, this.y2, 0);
+        ex.setPoints();
+        ex.explosionTime = this.explosionTime;   // <-- NUEVO
+        return ex;
+    }
+    // -----------------------------------------------------------------
 
     showPropertiesOnCreate(): boolean { return false; }
     getEditInfo(n: number): EditInfo | null {
@@ -272,16 +464,27 @@ export class AmmeterElm extends CircuitElm {
             ei.text = this.label;
             return ei;
         }
+        // ---- NUEVO: corriente máxima ----
+        if (n === 4) {
+            return new EditInfo("Max Current (A)", this.maxCurrent);
+        }
+        // ---------------------------------
         return null;
     }
 
     setEditValue(n: number, ei: EditInfo): void {
-        if (n === 0) this.meter = ei.choice.getSelectedIndex();
-        if (n === 1) this.scale = ei.choice.getSelectedIndex();
+        if (n === 0) this.meter = ei.choice!.getSelectedIndex();
+        if (n === 1) this.scale = ei.choice!.getSelectedIndex();
         if (n === 2) this.flags = ei.changeFlag(this.flags, AmmeterElm.FLAG_CIRCLE);
         if (n === 3) this.label = ei.textf ? ei.textf.value : (ei.text ?? "");
+        // ---- NUEVO: corriente máxima ----
+        if (n === 4) {
+            const v = ei.textf ? parseFloatStrict(ei.textf.value) : ei.value;
+            if (!isNaN(v) && v > 0)
+                this.maxCurrent = v;
+        }
+        // ---------------------------------
     }
 
     getExprRefName(): string | null { return this.label.length > 0 ? this.label : null; }
-
 }
